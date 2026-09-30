@@ -119,7 +119,10 @@ final class Server {
             ? AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
             : AXIsProcessTrusted()
         let app = kakao.app
-        var result: [String: Any] = ["trusted": trusted, "running": app != nil, "hidden": app?.isHidden ?? false]
+        var result: [String: Any] = [
+            "trusted": trusted, "running": app != nil, "hidden": app?.isHidden ?? false,
+            "screenCapture": CGPreflightScreenCaptureAccess(),
+        ]
         if let url = app?.bundleURL, let version = Bundle(url: url)?.infoDictionary?["CFBundleShortVersionString"] {
             result["version"] = version
         }
@@ -176,6 +179,7 @@ final class Server {
 }
 
 setvbuf(stdout, nil, _IONBF, 0)
+_ = NSApplication.shared  // connects to the window server; ScreenCaptureKit needs it
 let server = Server()
 let args = CommandLine.arguments
 

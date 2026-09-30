@@ -33,6 +33,9 @@ struct Message {
     /// ISO day ("2026-09-30"), from the time label's tooltip; dividers get the day they open.
     var date: String?
     var unread: Int?
+    /// Where a photo or emoticon is drawn, in screen points; captured while the row is on screen.
+    var imageFrame: CGRect?
+    var image: Thumbnail?
 
     /// Identity used to line up re-read rows with ones already reported.
     /// Time and unread counts are left out because KakaoTalk moves the time label
@@ -46,6 +49,7 @@ struct Message {
         if let time { d["time"] = time }
         if let date { d["date"] = date }
         if let unread { d["unread"] = unread }
+        if let image { d["image"] = image.json }
         return d
     }
 }
@@ -176,6 +180,7 @@ enum Parse {
             let shared = buttons.contains { $0.desc == "공유" || $0.desc == "Share" }
             msg.kind = shared || image.frame.width > 150 ? "photo" : "emoticon"
             msg.text = msg.kind == "photo" ? "사진" : "이모티콘"
+            msg.imageFrame = image.frame
             primary = image
         } else if !statics.isEmpty {
             msg.kind = "system"

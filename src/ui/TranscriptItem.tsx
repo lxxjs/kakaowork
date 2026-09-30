@@ -1,5 +1,7 @@
 import {Box, Text} from 'ink';
-import type {Message} from '../bridge/types.js';
+import {useMemo, type ReactNode} from 'react';
+import type {Message, Thumbnail} from '../bridge/types.js';
+import {fitCells, halfBlocks} from '../lib/image.js';
 import {width} from '../lib/text.js';
 import {formatDay} from '../lib/time.js';
 import type {Item} from '../lib/transcript.js';
@@ -25,6 +27,22 @@ function Body({message}: {message: Message}) {
 		default:
 			return <Text>{message.text}</Text>;
 	}
+}
+
+/** A photo or emoticon drawn in half-blocks, with the time trailing its last line. */
+function Picture({message, image, available, meta}: {message: Message; image: Thumbnail; available: number; meta: ReactNode}) {
+	const cells = fitCells(image, message.kind, available);
+	const lines = useMemo(() => halfBlocks(image, cells), [image, cells.columns, cells.rows]);
+	return (
+		<>
+			{lines.map((line, i) => (
+				<Text key={i} wrap="truncate">
+					{line}
+					{i === lines.length - 1 ? meta : null}
+				</Text>
+			))}
+		</>
+	);
 }
 
 function MessageView({item, columns}: {item: Extract<Item, {type: 'message'}>; columns: number}) {
@@ -62,6 +80,9 @@ function MessageView({item, columns}: {item: Extract<Item, {type: 'message'}>; c
 		</>
 	);
 
+	const available = Math.max(1, columns - 2 - 12); // bullet gutter, and room for the time
+	const picture = m.image ? <Picture message={m} image={m.image} available={available} meta={meta} /> : null;
+
 	if (m.mine) {
 		// Your own messages sit on a shaded band, like prompts in Claude Code's transcript.
 		// Consecutive ones share the band, so a burst reads as one block.
@@ -70,11 +91,13 @@ function MessageView({item, columns}: {item: Extract<Item, {type: 'message'}>; c
 				<Box width={2} flexShrink={0}>
 					<Text color={theme.secondary}>{item.first ? '❯' : ' '}</Text>
 				</Box>
-				<Box flexGrow={1} flexShrink={1}>
-					<Text color={theme.text}>
-						<Body message={m} />
-						{meta}
-					</Text>
+				<Box flexGrow={1} flexShrink={1} flexDirection="column">
+					{picture ?? (
+						<Text color={theme.text}>
+							<Body message={m} />
+							{meta}
+						</Text>
+					)}
 				</Box>
 			</Box>
 		);
@@ -87,16 +110,27 @@ function MessageView({item, columns}: {item: Extract<Item, {type: 'message'}>; c
 			<Box width={2} flexShrink={0}>
 				<Text color={theme.text}>{item.first ? '⏺' : ' '}</Text>
 			</Box>
-			<Box flexGrow={1} flexShrink={1}>
-				<Text>
-					{item.first && item.group ? (
-						<Text bold color={senderColor(name)}>
-							{name}{' '}
-						</Text>
-					) : null}
-					<Body message={m} />
-					{meta}
-				</Text>
+			<Box flexGrow={1} flexShrink={1} flexDirection="column">
+				{picture ? (
+					<>
+						{item.first && item.group ? (
+							<Text bold color={senderColor(name)}>
+								{name}
+							</Text>
+						) : null}
+						{picture}
+					</>
+				) : (
+					<Text>
+						{item.first && item.group ? (
+							<Text bold color={senderColor(name)}>
+								{name}{' '}
+							</Text>
+						) : null}
+						<Body message={m} />
+						{meta}
+					</Text>
+				)}
 			</Box>
 		</Box>
 	);

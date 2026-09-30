@@ -13,6 +13,14 @@ export interface ChatRoom {
 
 export type MessageKind = 'text' | 'photo' | 'emoticon' | 'file' | 'system' | 'divider';
 
+/** A downscaled photo or emoticon, captured from KakaoTalk's window by the bridge. */
+export interface Thumbnail {
+	w: number;
+	h: number;
+	/** Base64 of packed 8-bit RGB, row-major. */
+	rgb: string;
+}
+
 export interface Message {
 	row: number;
 	kind: MessageKind;
@@ -24,12 +32,16 @@ export interface Message {
 	/** ISO day, e.g. "2026-09-30". On a divider, the day it opens. */
 	date?: string;
 	unread?: number;
+	/** Photos and emoticons, when the terminal is allowed to record the screen. */
+	image?: Thumbnail;
 }
 
 export interface Status {
 	trusted: boolean;
 	running: boolean;
 	hidden: boolean;
+	/** Screen Recording permission, which photo previews need. */
+	screenCapture?: boolean;
 	version?: string;
 	me?: string | null;
 	totalUnread?: number | null;

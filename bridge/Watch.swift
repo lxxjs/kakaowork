@@ -49,18 +49,21 @@ extension Kakao {
         guard let lastMessage else { return [] }
         if lastIndex == room.lastIndex && lastMessage.signature == room.lastSignature { return [] }
 
+        let viewport = scroll.frame
+        func parse(_ i: Int) -> Message? { parseWithImage(rows[i], index: i, window: window, viewport: viewport) }
+
         var fresh: [Message] = []
         let appended = room.lastIndex >= 0 && lastIndex > room.lastIndex && room.lastIndex < rows.count
             && Parse.messageRow(rows[room.lastIndex], index: room.lastIndex)?.signature == room.lastSignature
         if appended {
             for i in (room.lastIndex + 1)...lastIndex {
-                if let m = i == lastIndex ? lastMessage : Parse.messageRow(rows[i], index: i) { fresh.append(m) }
+                if let m = parse(i) { fresh.append(m) }
             }
         } else {
             // Rows shifted (older history loaded, a message deleted, …): line up by content.
             var parsed: [Int: Message] = [:]
             visitRows(scroll: scroll, table: table, indices: Array(max(0, lastIndex - 24)...lastIndex)) { index, row in
-                if let m = Parse.messageRow(row, index: index) { parsed[index] = m }
+                if let m = parseWithImage(row, index: index, window: window, viewport: viewport) { parsed[index] = m }
                 return false
             }
             let window = parsed.keys.sorted().compactMap { parsed[$0] }

@@ -525,6 +525,7 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 							lines: [
 								`KakaoTalk ${s.version ?? '?'} · ${s.running ? '실행 중' : '꺼짐'}${s.hidden ? ' · 숨김' : ''}`,
 								`손쉬운 사용 권한 · ${s.trusted ? '허용됨' : '필요함'}`,
+								`화면 기록 권한 · ${s.screenCapture ? '허용됨 (사진 미리보기)' : '꺼짐 · 사진은 [사진]으로만 표시'}`,
 								`내 프로필 · ${s.me ?? '알 수 없음'}`,
 								`안 읽은 메시지 · ${s.totalUnread ?? '?'}`,
 								`열린 채팅창 · ${s.openChats?.length ? s.openChats.join(', ') : '없음'}`,

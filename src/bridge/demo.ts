@@ -1,5 +1,5 @@
 import {formatClock, isoDay} from '../lib/time.js';
-import {BridgeError, type Bridge, type BridgeEvent, type ChatRoom, type Message} from './types.js';
+import {BridgeError, type Bridge, type BridgeEvent, type ChatRoom, type Message, type Thumbnail} from './types.js';
 
 type DemoRoom = ChatRoom & {log: Message[]; open: boolean};
 
@@ -8,6 +8,33 @@ const replies = ['ㅋㅋㅋㅋ 좋아', '오 진짜?', '잠깐만 확인해볼�
 function msg(kind: Message['kind'], text: string, mine: boolean, sender?: string, time?: string, extra: Partial<Message> = {}): Message {
 	return {row: 0, kind, text, mine, sender, time, ...extra};
 }
+
+/** Paints a thumbnail pixel by pixel, standing in for a captured picture. */
+function paint(w: number, h: number, pixel: (x: number, y: number) => [number, number, number]): Thumbnail {
+	const rgb = Buffer.alloc(w * h * 3);
+	for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) rgb.set(pixel(x / w, y / h), (y * w + x) * 3);
+	return {w, h, rgb: rgb.toString('base64')};
+}
+
+const mix = (a: number[], b: number[], t: number) => a.map((v, i) => Math.round(v + (b[i] - v) * t)) as [number, number, number];
+
+// A sunset over the sea.
+const sunset = paint(96, 64, (x, y) => {
+	if (Math.hypot(x - 0.5, (y - 0.55) * 1.5) < 0.16 && y < 0.6) return [255, 214, 120];
+	if (y < 0.6) return mix([40, 44, 110], [250, 128, 90], y / 0.6);
+	const shimmer = Math.abs(x - 0.5) < 0.12 * (1 - (y - 0.6)) && Math.sin(y * 90) > 0 ? 0.5 : 0;
+	return mix(mix([30, 60, 110], [10, 25, 55], (y - 0.6) / 0.4), [255, 200, 120], shimmer);
+});
+
+// A round yellow face, KakaoTalk-emoticon style.
+const smiley = paint(48, 48, (x, y) => {
+	const d = Math.hypot(x - 0.5, y - 0.5);
+	if (d > 0.45) return [255, 255, 255];
+	if (d > 0.42) return [60, 40, 20];
+	if (Math.hypot(x - 0.35, y - 0.4) < 0.05 || Math.hypot(x - 0.65, y - 0.4) < 0.05) return [60, 40, 20];
+	if (Math.abs(Math.hypot(x - 0.5, y - 0.5) - 0.22) < 0.03 && y > 0.55) return [60, 40, 20];
+	return [255, 220, 60];
+});
 
 function seed(): DemoRoom[] {
 	const rooms: DemoRoom[] = [
@@ -18,7 +45,7 @@ function seed(): DemoRoom[] {
 				msg('text', '오늘 저녁 뭐 먹을래?', true, undefined, '오후 3:20'),
 				msg('text', '음 글쎄', false, '민지'),
 				msg('text', '파스타 어때', false, '민지', '오후 3:25'),
-				msg('photo', '사진', false, '민지', '오후 3:26'),
+				msg('photo', '사진', false, '민지', '오후 3:26', {image: sunset}),
 				msg('text', '좋아 몇 시?', true, undefined, '오후 3:27'),
 				msg('text', '7시 어때?', false, '민지', '오후 3:28'),
 			],
@@ -36,7 +63,7 @@ function seed(): DemoRoom[] {
 			index: 2, name: '가족', members: 4, time: '오후 1:02', preview: '저녁 먹고 와?', unread: 0, muted: false, kind: 'group', open: false,
 			log: [
 				msg('text', '저녁 먹고 와?', false, '엄마', '오후 1:02'),
-				msg('emoticon', '이모티콘', false, '아빠', '오후 1:03'),
+				msg('emoticon', '이모티콘', false, '아빠', '오후 1:03', {image: smiley}),
 			],
 		},
 		{

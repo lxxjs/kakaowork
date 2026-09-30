@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import * as ed from '../dist/lib/editor.js';
 import {chosung, filterRooms, score} from '../dist/lib/fuzzy.js';
+import {fitCells, halfBlocks} from '../dist/lib/image.js';
 import {formatDay} from '../dist/lib/time.js';
 import {fillTimes, Grouper} from '../dist/lib/transcript.js';
-import {wrapRows} from '../dist/lib/text.js';
+import {width, wrapRows} from '../dist/lib/text.js';
 import {layout} from '../dist/ui/PromptInput.js';
 
 test('editor edits around wide and multi-code-unit characters', () => {
@@ -100,4 +101,26 @@ test('formatDay spells out a separator date with its weekday', () => {
 	assert.equal(formatDay('2026-09-30'), '2026년 9월 30일 수요일');
 	assert.equal(formatDay('2026-01-04'), '2026년 1월 4일 일요일');
 	assert.equal(formatDay('not a date'), 'not a date');
+});
+
+test('halfBlocks draws two pixels per cell and measures exactly its column count', () => {
+	// 2×4: left column red over blue (twice), right column all green.
+	const px = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [0, 255, 0], [255, 0, 0], [0, 255, 0], [0, 0, 255], [0, 255, 0]];
+	const image = {w: 2, h: 4, rgb: Buffer.from(px.flat()).toString('base64')};
+	const lines = halfBlocks(image, {columns: 2, rows: 2});
+	assert.equal(lines.length, 2);
+	for (const line of lines) assert.equal(width(line), 2);
+	assert.equal(lines[0], '\u001B[38;2;255;0;0;48;2;0;0;255m▀\u001B[38;2;0;255;0;48;2;0;255;0m▀\u001B[39;49m');
+});
+
+test('halfBlocks averages when shrinking', () => {
+	const image = {w: 2, h: 2, rgb: Buffer.from([0, 0, 0, 200, 100, 50, 0, 0, 0, 200, 100, 50]).toString('base64')};
+	assert.equal(halfBlocks(image, {columns: 1, rows: 1})[0], '\u001B[38;2;100;50;25;48;2;100;50;25m▀\u001B[39;49m');
+});
+
+test('fitCells keeps pictures within 30 columns and 5 rows, preserving shape', () => {
+	assert.deepEqual(fitCells({w: 96, h: 64}, 'photo', 80), {columns: 15, rows: 5}); // 3:2 is height-bound
+	assert.deepEqual(fitCells({w: 96, h: 16}, 'photo', 80), {columns: 30, rows: 3}); // panorama is width-bound
+	assert.deepEqual(fitCells({w: 96, h: 16}, 'photo', 10), {columns: 10, rows: 1}); // narrow terminal
+	assert.deepEqual(fitCells({w: 72, h: 96}, 'photo', 80), {columns: 8, rows: 5});
 });

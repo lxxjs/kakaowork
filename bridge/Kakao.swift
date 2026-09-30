@@ -16,6 +16,7 @@ final class Kakao {
     private static let inputLabels: Set<String> = ["메시지 입력", "Enter a message", "Message"]
 
     private var cached: (pid: pid_t, element: AXUIElement)?
+    let capture = Capture()
 
     /// Keep KakaoTalk hidden: re-hide it after it had to come forward, and whenever the
     /// user switches away from it.
@@ -312,10 +313,24 @@ final class Kakao {
         let rows = table.children
         let start = max(0, rows.count - limit - 1)
         var parsed: [Int: Message] = [:]
+        let viewport = scroll.frame
         visitRows(scroll: scroll, table: table, indices: Array(start..<rows.count)) { index, row in
-            if let m = Parse.messageRow(row, index: index) { parsed[index] = m }
+            if let m = parseWithImage(row, index: index, window: window, viewport: viewport) { parsed[index] = m }
             return false
         }
+        // Rows are read as soon as any part is on screen, so a tall photo can come out clipped.
+        // Scroll each of those fully into view and try again.
+        let missed = parsed.values.filter { $0.imageFrame != nil && $0.image == nil }.map(\.row).sorted()
+        if !missed.isEmpty {
+            let bar = scrollBar(scroll)
+            let original = bar?.number
+            for index in missed where index < rows.count {
+                park(scroll: scroll, table: table, bar: bar, row: rows[index], atBottom: false)
+                if let m = parseWithImage(rows[index], index: index, window: window, viewport: viewport) { parsed[index] = m }
+            }
+            if let bar, let original { bar.set(kAXValueAttribute, original as CFNumber) }
+        }
+
         var list = parsed.keys.sorted().compactMap { parsed[$0] }
         if list.count > limit { list = Array(list.suffix(limit)) }
 
@@ -333,6 +348,13 @@ final class Kakao {
         Kakao.fillSenders(&list, carry: carry)
         Kakao.fillDividerDates(&list)
         return (list, rows.count)
+    }
+
+    /// Parses a row and, if it shows a photo or emoticon, grabs the picture while it is on screen.
+    func parseWithImage(_ row: AXUIElement, index: Int, window: AXUIElement, viewport: CGRect) -> Message? {
+        guard var m = Parse.messageRow(row, index: index) else { return nil }
+        if let frame = m.imageFrame { m.image = capture.thumbnail(window: window, rect: frame, viewport: viewport) }
+        return m
     }
 
     /// Date separators expose no text, but every day's messages carry their date on
@@ -479,6 +501,23 @@ final class Kakao {
         usleep(50_000)
     }
 
+    func scrollBar(_ scroll: AXUIElement) -> AXUIElement? {
+        scroll.children.first { $0.role == "AXScrollBar" && $0.frame.height > $0.frame.width }
+    }
+
+    /// Scrolls so `row` sits at the top (or bottom) edge of the viewport.
+    private func park(scroll: AXUIElement, table: AXUIElement, bar: AXUIElement?, row: AXUIElement, atBottom: Bool) {
+        guard let bar else { return }
+        let tableFrame = table.frame
+        let viewport = scroll.frame.height
+        let maxOffset = tableFrame.height - viewport
+        let rowFrame = row.frame
+        let offset = atBottom ? rowFrame.maxY - tableFrame.minY - viewport : rowFrame.minY - tableFrame.minY
+        let value = maxOffset > 0 ? min(1, max(0, offset / maxOffset)) : 0
+        bar.set(kAXValueAttribute, value as CFNumber)
+        usleep(30_000)
+    }
+
     func visibleRows(_ table: AXUIElement) -> [AXUIElement] {
         table.attribute("AXVisibleRows") as? [AXUIElement] ?? []
     }
@@ -508,7 +547,7 @@ final class Kakao {
         if visitVisible() || pending.isEmpty { return }
 
         let rows = table.children
-        let bar = scroll.children.first { $0.role == "AXScrollBar" && $0.frame.height > $0.frame.width }
+        let bar = scrollBar(scroll)
         let original = bar?.number
         defer { if restore, let bar, let original { bar.set(kAXValueAttribute, original as CFNumber) } }
         // Walking upwards, park the next row at the bottom of the viewport instead of the top.
@@ -519,14 +558,7 @@ final class Kakao {
             attempts += 1
             let before = pending.count
             if let bar, next < rows.count {
-                let tableFrame = table.frame
-                let viewport = scroll.frame.height
-                let maxOffset = tableFrame.height - viewport
-                let rowFrame = rows[next].frame
-                let offset = descending ? rowFrame.maxY - tableFrame.minY - viewport : rowFrame.minY - tableFrame.minY
-                let value = maxOffset > 0 ? min(1, max(0, offset / maxOffset)) : 0
-                bar.set(kAXValueAttribute, value as CFNumber)
-                usleep(30_000)
+                park(scroll: scroll, table: table, bar: bar, row: rows[next], atBottom: descending)
                 if visitVisible() { return }
             }
             if pending.count == before {
