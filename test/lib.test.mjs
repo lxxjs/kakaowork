@@ -123,4 +123,5 @@ test('fitCells keeps pictures within 30 columns and 5 rows, preserving shape', (
 	assert.deepEqual(fitCells({w: 96, h: 16}, 'photo', 80), {columns: 30, rows: 3}); // panorama is width-bound
 	assert.deepEqual(fitCells({w: 96, h: 16}, 'photo', 10), {columns: 10, rows: 1}); // narrow terminal
 	assert.deepEqual(fitCells({w: 72, h: 96}, 'photo', 80), {columns: 8, rows: 5});
+	assert.deepEqual(fitCells({w: 48, h: 48}, 'emoticon', 80), {columns: 5, rows: 3}); // emoticons stay small
 });

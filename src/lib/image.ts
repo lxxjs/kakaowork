@@ -10,16 +10,18 @@ export type Cells = {columns: number; rows: number};
  * @param available columns left for the message body
  */
 export function fitCells(image: Pick<Thumbnail, 'w' | 'h'>, kind: MessageKind, available: number): Cells {
-	// Kept small so a few pictures don't push the conversation off screen:
-	// at most ~15 Hangul syllables wide and 5 lines tall.
-	const maxColumns = Math.max(1, Math.min(available, MAX_COLUMNS));
-	const columns = Math.max(1, Math.min(maxColumns, Math.round((MAX_ROWS * 2 * image.w) / image.h)));
-	const rows = Math.max(1, Math.min(MAX_ROWS, Math.round((columns * image.h) / image.w / 2)));
+	// Kept small so a few pictures don't push the conversation off screen.
+	const limit = LIMITS[kind === 'emoticon' ? 'emoticon' : 'photo'];
+	const maxColumns = Math.max(1, Math.min(available, limit.columns));
+	const columns = Math.max(1, Math.min(maxColumns, Math.round((limit.rows * 2 * image.w) / image.h)));
+	const rows = Math.max(1, Math.min(limit.rows, Math.round((columns * image.h) / image.w / 2)));
 	return {columns, rows};
 }
 
-const MAX_ROWS = 5;
-const MAX_COLUMNS = 30; // a Hangul syllable is two columns wide
+const LIMITS = {
+	photo: {columns: 30, rows: 5}, // ~15 Hangul syllables wide (each is two columns)
+	emoticon: {columns: 5, rows: 3},
+};
 
 type Pixels = {w: number; h: number; data: Uint8Array};
 
