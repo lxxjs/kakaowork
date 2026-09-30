@@ -1,5 +1,5 @@
 {
-  "name": "kakaowork",
+  "name": "@lxxjs/kakaowork",
   "version": "0.1.0",
   "description": "KakaoTalk for macOS, in your terminal — with a Claude Code–style UI",
   "type": "module",
@@ -7,17 +7,19 @@
     "kakaowork": "bin/kakaowork.js"
   },
   "scripts": {
-    "build:bridge": "mkdir -p dist && swiftc -O -framework ApplicationServices -framework AppKit bridge/*.swift -o dist/kakao-bridge",
+    "build:bridge": "sh scripts/build-bridge.sh",
     "build:ts": "tsc -p tsconfig.json",
-    "build": "npm run build:bridge && npm run build:ts",
+    "build": "npm run clean && npm run build:bridge && npm run build:ts",
     "start": "node bin/kakaowork.js",
     "demo": "node bin/kakaowork.js --demo",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test test/*.test.mjs",
-    "prepare": "npm run build"
+    "prepack": "npm run build",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm test"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "os": [
     "darwin"
@@ -35,8 +37,22 @@
   },
   "files": [
     "bin",
-    "dist",
-    "bridge",
-    "src"
-  ]
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lxxjs/kakaowork.git"
+  },
+  "homepage": "https://github.com/lxxjs/kakaowork#readme",
+  "keywords": [
+    "kakaotalk",
+    "kakao",
+    "cli",
+    "tui",
+    "macos",
+    "terminal"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }
