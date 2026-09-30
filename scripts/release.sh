@@ -1,10 +1,9 @@
 #!/bin/sh
 # Cuts a release: bumps the version, packs the npm tarball (which builds the universal
-# bridge), publishes it as a GitHub release and to npm, and points the Homebrew formula
-# at it.
+# bridge), publishes it as a GitHub release, and points the Homebrew formula at it.
 #
 #   scripts/release.sh [patch|minor|major|<version>]   (default: patch)
-#   SKIP_NPM=1 scripts/release.sh                       # GitHub + Homebrew only
+#   NPM=1 scripts/release.sh                            # also publish to npm
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -16,8 +15,8 @@ if [ -n "$(git status --porcelain)" ]; then
 	echo "작업 트리가 깨끗하지 않습니다. 먼저 커밋하세요." >&2
 	exit 1
 fi
-if [ -z "${SKIP_NPM:-}" ] && ! npm whoami >/dev/null 2>&1; then
-	echo "npm 에 로그인되어 있지 않습니다: npm login (npm 을 건너뛰려면 SKIP_NPM=1)" >&2
+if [ -n "${NPM:-}" ] && ! npm whoami >/dev/null 2>&1; then
+	echo "npm 에 로그인되어 있지 않습니다: npm login" >&2
 	exit 1
 fi
 gh auth status >/dev/null
@@ -36,7 +35,7 @@ git push --follow-tags
 gh release create "$tag" "$tarball" --repo "$repo" --title "$tag" --generate-notes
 
 # Publish the very tarball the formula points at, so npm and Homebrew ship the same bits.
-[ -n "${SKIP_NPM:-}" ] || npm publish "$tarball"
+[ -z "${NPM:-}" ] || npm publish "$tarball"
 
 gh repo view "$tap" >/dev/null 2>&1 ||
 	gh repo create "$tap" --public --description "Homebrew formulae for kakaowork"
@@ -54,4 +53,4 @@ sed -e "s|@URL@|https://github.com/$repo/releases/download/$tag/lxxjs-kakaowork-
 
 echo "릴리스 완료: $tag"
 echo "  brew install lxxjs/tap/kakaowork"
-[ -n "${SKIP_NPM:-}" ] || echo "  npm i -g @lxxjs/kakaowork"
+[ -z "${NPM:-}" ] || echo "  npm i -g @lxxjs/kakaowork"

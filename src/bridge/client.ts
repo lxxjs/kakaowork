@@ -25,7 +25,7 @@ export class ProcessBridge implements Bridge {
 
 	constructor(binary = bridgeBinaryPath()) {
 		if (!existsSync(binary)) {
-			throw new BridgeError('no_bridge', `브리지 바이너리가 없습니다: ${binary} (패키지를 다시 설치해 주세요: npm i -g @lxxjs/kakaowork)`);
+			throw new BridgeError('no_bridge', `브리지 바이너리가 없습니다: ${binary} (다시 설치해 주세요: brew reinstall kakaowork)`);
 		}
 
 		this.child = spawn(binary, [], {stdio: ['pipe', 'pipe', 'pipe']});

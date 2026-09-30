@@ -3,15 +3,17 @@
 macOS 카카오톡을 **터미널에서 Claude Code 같은 UI로** 쓰는 CLI입니다.
 
 ```
-╭─── KakaoTalk Code v0.1.0 ────────────────────────────────────────────────────╮
+╭─── KakaoTalk Code v0.1.1 ────────────────────────────────────────────────────╮
 │                                   │ Tips for getting started                 │
 │         Welcome back 나!          │ /chats 로 채팅방을 골라 여세요           │
 │                                   │ /open ㄱㅈ 처럼 초성으로 바로 열기       │
-│              ▐▛███▜▌              │ 메시지를 입력하고 ⏎ 로 보내세요          │
-│             ▝▜█████▛▘             │ ──────────────────────────────────────── │
-│               ▘▘ ▝▝               │ Recent activity                          │
-│                                   │ 민지 2 · 오후 3:28                       │
-│      KakaoTalk 26.8.0 · 안 읽음 5 │ 개발팀 3 · 오후 3:10                     │
+│             █▄     ▄█             │ 메시지를 입력하고 ⏎ 로 보내세요          │
+│            ▄██▀███▀██▄            │ ──────────────────────────────────────── │
+│           =███▄█▀█▄███=           │ Recent activity                          │
+│             ▀███████▀             │ 민지 2 · 오후 3:28                       │
+│                                   │ 개발팀 3 · 오후 3:10                     │
+│   KakaoTalk 26.8.0 · 안 읽음 5    │                                          │
+│                 ~                 │                                          │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 
 ⏺ Open(개발팀)
@@ -32,36 +34,16 @@ macOS 카카오톡을 **터미널에서 Claude Code 같은 UI로** 쓰는 CLI입
   개발팀 | 멤버 5명 | 안 읽음 5
 ```
 
-- 상대 메시지는 Claude Code 응답처럼 `⏺` 하나 아래로, 내 메시지는 Claude Code 프롬프트처럼 회색 띠 위에 `❯`로 표시됩니다. 연달아 보낸 메시지는 한 덩어리로 합쳐집니다.
-- 입력창 아래 상태줄에 채팅방 이름, 멤버 수, 안 읽은 메시지 수가 나옵니다.
-- Claude Code의 fullscreen 모드처럼 대체 화면(alternate screen)에서 실행됩니다. `/exit`로 나가면 터미널이 실행 전 화면으로 그대로 돌아가서, 이전 셸 기록은 남고 kakaowork 대화만 사라집니다. 대화는 앱 안에서 PgUp/PgDn, 마우스 휠, Shift+↑↓로 스크롤합니다(맨 위에서 PgUp을 누르면 이전 메시지를 더 불러옵니다).
-- 방 열기 같은 동작은 도구 호출처럼 `⏺ Open(...)` / `⎿`로 표시됩니다.
-- 다른 채팅방에 새 메시지가 오면 알림 줄이 뜹니다.
-
-## 동작 방식
-
-카카오톡에는 개인 메시지용 공식 API가 없습니다. 그래서 **실행 중인 macOS 카카오톡 앱을 손쉬운 사용(Accessibility) API로 읽고 조작합니다.**
-
-```
-kakaowork (Node + Ink TUI)  ──JSON lines──▶  dist/kakao-bridge (Swift)  ──AX API──▶  KakaoTalk.app
-```
-
-- `bridge/` — 창 없이 동작하는 Swift 헬퍼입니다. 채팅 목록과 메시지를 읽고, 방을 열고, 메시지를 보내며, 새 메시지를 감지(0.7초 폴링)합니다.
-- `src/` — Claude Code와 같은 프레임워크(Ink)로 만든 터미널 UI입니다.
-- 카카오톡 앱은 켜져 있기만 하면 됩니다. 기본으로 **숨김 모드**라 카카오톡 창은 숨겨진 채로 동작하고, 방을 열 때처럼 꼭 필요할 때만 잠깐 떴다가 다시 숨으면서 포커스가 터미널로 돌아옵니다. 카카오톡을 직접 열어 보다가 다른 앱으로 넘어가도 다시 숨겨집니다.
-
 ## 설치
 
-필요한 것: macOS 12 이상(Apple Silicon·Intel), 카카오톡 맥 앱(로그인 상태). npm으로 설치하면 Node 22 이상도 필요합니다(Homebrew는 알아서 설치)
+[Homebrew](https://brew.sh)로 설치합니다. macOS 12 이상(Apple Silicon·Intel)과 로그인된 카카오톡 맥 앱이 필요합니다.
 
 ```sh
-brew install lxxjs/tap/kakaowork   # Homebrew
-npm i -g @lxxjs/kakaowork          # 또는 npm
-kakaowork                          # 실행
+brew install lxxjs/tap/kakaowork
+kakaowork
 ```
 
-설치 없이 한 번 써 보려면 `npx @lxxjs/kakaowork`를 실행하세요. Swift 헬퍼는 미리 빌드된 유니버설 바이너리로 들어 있어서 Xcode가 없어도 됩니다.
-카카오톡이 꺼져 있으면 kakaowork가 알아서 실행합니다.
+업데이트는 `brew upgrade kakaowork`로 합니다. 카카오톡이 꺼져 있으면 kakaowork가 알아서 실행합니다.
 
 처음 실행하면 **손쉬운 사용 권한**을 요청합니다.
 시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용에서 **지금 쓰는 터미널 앱**(Terminal, iTerm, Ghostty 등)을 켜 주세요.
@@ -112,6 +94,18 @@ kakaowork --demo       # 카카오톡 없이 가상 데이터로 UI 체험
 - 카카오톡 26.8.0(한국어 UI)에서 테스트했습니다. 카카오톡 화면 구조가 바뀌면 동작하지 않을 수 있습니다.
 - 비공식 도구입니다. 본인 계정의 일상적인 대화에만 쓰고, 자동 대량 발송 같은 용도로는 쓰지 마세요.
 
+## 동작 방식
+
+카카오톡에는 개인 메시지용 공식 API가 없습니다. 그래서 **실행 중인 macOS 카카오톡 앱을 손쉬운 사용(Accessibility) API로 읽고 조작합니다.**
+
+```
+kakaowork (Node + Ink TUI)  ──JSON lines──▶  dist/kakao-bridge (Swift)  ──AX API──▶  KakaoTalk.app
+```
+
+- `bridge/` — 창 없이 동작하는 Swift 헬퍼입니다. 채팅 목록과 메시지를 읽고, 방을 열고, 메시지를 보내며, 새 메시지를 감지(0.7초 폴링)합니다.
+- `src/` — Claude Code와 같은 프레임워크(Ink)로 만든 터미널 UI입니다.
+- 카카오톡 앱은 켜져 있기만 하면 됩니다. 기본으로 **숨김 모드**라 카카오톡 창은 숨겨진 채로 동작하고, 방을 열 때처럼 꼭 필요할 때만 잠깐 떴다가 다시 숨으면서 포커스가 터미널로 돌아옵니다. 카카오톡을 직접 열어 보다가 다른 앱으로 넘어가도 다시 숨겨집니다.
+
 ## 개발
 
 필요한 것: Xcode Command Line Tools(`swiftc`)
@@ -136,7 +130,6 @@ dist/kakao-bridge messages '{"title": "가족", "limit": 10}'
 
 ```sh
 scripts/release.sh            # patch 버전 릴리스 (minor, major, 1.2.3 도 가능)
-SKIP_NPM=1 scripts/release.sh # npm 은 건너뛰고 GitHub + Homebrew 만
 ```
 
-한 번에 버전 올리기 → 빌드·테스트 → GitHub 릴리스(`.tgz` 첨부) → npm 업로드 → [`lxxjs/homebrew-tap`](https://github.com/lxxjs/homebrew-tap)의 Formula 갱신까지 합니다. Formula 원본은 `packaging/kakaowork.rb`입니다.
+한 번에 버전 올리기 → 빌드·테스트 → GitHub 릴리스(`.tgz` 첨부) → [`lxxjs/homebrew-tap`](https://github.com/lxxjs/homebrew-tap)의 Formula 갱신까지 합니다. Formula 원본은 `packaging/kakaowork.rb`입니다.
