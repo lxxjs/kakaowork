@@ -30,6 +30,8 @@ struct Message {
     var text = ""
     var detail: String?
     var time: String?
+    /// ISO day ("2026-09-30"), from the time label's tooltip; dividers get the day they open.
+    var date: String?
     var unread: Int?
 
     /// Identity used to line up re-read rows with ones already reported.
@@ -42,6 +44,7 @@ struct Message {
         if let sender { d["sender"] = sender }
         if let detail { d["detail"] = detail }
         if let time { d["time"] = time }
+        if let date { d["date"] = date }
         if let unread { d["unread"] = unread }
         return d
     }
@@ -51,12 +54,21 @@ enum Parse {
     private static let timePattern = try! NSRegularExpression(
         pattern: #"^((오전|오후) ?\d{1,2}:\d{2}|\d{1,2}:\d{2}( ?[AaPp][Mm])?)$"#)
     private static let countPattern = try! NSRegularExpression(pattern: #"^\d+\+?$"#)
+    private static let datePattern = try! NSRegularExpression(pattern: #"(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})"#)
     private static let fileActions: Set<String> = ["저장", "열기", "Finder에서 보기", "다른 이름으로 저장", "Save", "Open", "Show in Finder", "Save As"]
     private static let profileLabels: Set<String> = ["프로필", "Profile"]
 
     static func isTime(_ s: String) -> Bool { matches(timePattern, s) }
     static func isCount(_ s: String) -> Bool { matches(countPattern, s) }
     static func count(_ s: String) -> Int { Int(s.filter(\.isNumber)) ?? 0 }
+
+    /// "2026. 9. 30." → "2026-09-30"
+    static func isoDate(_ s: String) -> String? {
+        guard let m = datePattern.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) else { return nil }
+        let parts = (1...3).compactMap { Range(m.range(at: $0), in: s).flatMap { Int(s[$0]) } }
+        guard parts.count == 3 else { return nil }
+        return String(format: "%04d-%02d-%02d", parts[0], parts[1], parts[2])
+    }
 
     private static func matches(_ re: NSRegularExpression, _ s: String) -> Bool {
         re.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil
@@ -126,6 +138,7 @@ enum Parse {
                 let v = kid.text
                 if isTime(v) {
                     msg.time = v
+                    msg.date = isoDate(kid.help)
                 } else if isCount(v) && kid.frame.width < 30 {
                     msg.unread = count(v)
                 } else {

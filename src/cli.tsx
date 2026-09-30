@@ -4,7 +4,7 @@ import {App} from './app.js';
 import {ProcessBridge} from './bridge/client.js';
 import {DemoBridge} from './bridge/demo.js';
 import type {Bridge} from './bridge/types.js';
-import {useKakaoAccent} from './ui/theme.js';
+import {useClaudeAccent} from './ui/theme.js';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {version: string};
 
@@ -15,8 +15,8 @@ const USAGE = `kakaowork — 터미널에서 Claude Code 처럼 쓰는 카카오
 
 옵션
   --demo           카카오톡 없이 가상 데이터로 실행
-  --hide           시작할 때 카카오톡 창 숨기기
-  --theme kakao    강조색을 카카오 노랑으로 (기본: claude)
+  --no-hide        카카오톡 창을 숨기지 않고 그대로 두기
+  --theme claude   강조색을 Claude 주황으로 (기본: kakao 노랑)
   -v, --version    버전
   -h, --help       도움말
 
@@ -28,7 +28,7 @@ const USAGE = `kakaowork — 터미널에서 Claude Code 처럼 쓰는 카카오
 type Options = {demo: boolean; hide: boolean; theme: string; room?: string};
 
 function parse(argv: string[]): Options {
-	const options: Options = {demo: false, hide: false, theme: 'claude'};
+	const options: Options = {demo: false, hide: true, theme: 'kakao'};
 	const rest: string[] = [];
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
@@ -42,8 +42,10 @@ function parse(argv: string[]): Options {
 			options.demo = true;
 		} else if (arg === '--hide') {
 			options.hide = true;
+		} else if (arg === '--no-hide') {
+			options.hide = false;
 		} else if (arg === '--theme') {
-			options.theme = argv[++i] ?? 'claude';
+			options.theme = argv[++i] ?? 'kakao';
 		} else if (arg.startsWith('--theme=')) {
 			options.theme = arg.slice('--theme='.length);
 		} else if (arg.startsWith('-')) {
@@ -70,7 +72,7 @@ if (process.platform !== 'darwin' && !options.demo) {
 	process.exit(1);
 }
 
-if (options.theme === 'kakao') useKakaoAccent();
+if (options.theme === 'claude') useClaudeAccent();
 
 let bridge: Bridge;
 try {
@@ -80,25 +82,18 @@ try {
 	process.exit(1);
 }
 
-const screen = {clear: () => {}};
 const instance = render(
-	<App
-		bridge={bridge}
-		demo={options.demo}
-		appVersion={pkg.version}
-		cwd={process.cwd()}
-		initialRoom={options.room}
-		hideOnStart={options.hide}
-		resetScreen={() => screen.clear()}
-	/>,
-	{exitOnCtrlC: false},
+	<App bridge={bridge} demo={options.demo} appVersion={pkg.version} cwd={process.cwd()} initialRoom={options.room} hideOnStart={options.hide} />,
+	// Like Claude Code's fullscreen mode: draw on the alternate screen, so quitting puts the
+	// terminal back exactly as it was and no chat is left in its scrollback.
+	{exitOnCtrlC: false, alternateScreen: true},
 );
 
-// Switching rooms starts a fresh screen, the way Claude Code's /clear does.
-screen.clear = () => {
-	instance.clear();
-	process.stdout.write('\u001B[2J\u001B[3J\u001B[H');
-};
+// Mouse reporting (button events, SGR encoding) so the wheel scrolls the conversation.
+const mouseOn = '\u001B[?1000h\u001B[?1006h';
+const mouseOff = '\u001B[?1000l\u001B[?1006l';
+process.stdout.write(mouseOn);
+process.on('exit', () => process.stdout.write(mouseOff));
 
 const shutdown = () => {
 	bridge.dispose();

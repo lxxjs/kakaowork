@@ -47,10 +47,13 @@ struct Node {
     let value: String?
     let frame: CGRect
     let children: [AXUIElement]
+    /// Tooltip text. A message's time label carries its date here ("2026. 9. 30.").
+    let help: String
 
     private static let names = [
         kAXRoleAttribute, kAXIdentifierAttribute, kAXTitleAttribute, kAXDescriptionAttribute,
         kAXValueAttribute, kAXPositionAttribute, kAXSizeAttribute, kAXChildrenAttribute,
+        kAXHelpAttribute,
     ] as CFArray
 
     init(_ element: AXUIElement) {
@@ -75,6 +78,7 @@ struct Node {
         if let v = at(6), CFGetTypeID(v) == AXValueGetTypeID() { AXValueGetValue(v as! AXValue, .cgSize, &size) }
         frame = CGRect(origin: origin, size: size)
         children = at(7) as? [AXUIElement] ?? []
+        help = at(8) as? String ?? ""
     }
 
     var text: String { value ?? "" }

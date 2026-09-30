@@ -3,10 +3,24 @@ import type {ChatRoom} from '../bridge/types.js';
 import {truncate, width} from '../lib/text.js';
 import {theme} from './theme.js';
 
-type Segment = {text: string; color?: string; bold?: boolean; dim?: boolean};
+type Segment = {text: string; color?: string; background?: string; bold?: boolean; dim?: boolean};
 type Line = Segment[];
 
-const MASCOT = [' ▐▛███▜▌ ', '▝▜█████▛▘', '  ▘▘ ▝▝  '];
+// A round speech bubble with a face (eyes, a dot of a mouth, a tail at the bottom left),
+// drawn with half blocks so each cell holds two pixels, like Claude Code's mascot.
+// A cat: pointed ears, tall eyes, a pink nose and whiskers. Half blocks give two pixels
+// per cell; the nose is a cell whose top half is fur (text color) and bottom half pink
+// (background color).
+function mascot(): Line[] {
+	const fur = (text: string): Segment => ({text, color: theme.kakao});
+	const whisker: Segment = {text: '=', color: theme.secondary};
+	return [
+		[fur('  █▄     ▄█  ')],
+		[fur(' ▄██▀███▀██▄ ')],
+		[whisker, fur('███▄█'), {text: '▀', color: theme.kakao, background: theme.blush}, fur('█▄███'), whisker],
+		[fur('  ▀███████▀  ')],
+	];
+}
 
 type Props = {
 	me?: string | null;
@@ -42,7 +56,7 @@ function Row({segments}: {segments: Line}) {
 	return (
 		<Text>
 			{segments.map((s, i) => (
-				<Text key={i} color={s.color} bold={s.bold} dimColor={s.dim}>
+				<Text key={i} color={s.color} backgroundColor={s.background} bold={s.bold} dimColor={s.dim}>
 					{s.text}
 				</Text>
 			))}
@@ -69,7 +83,7 @@ export function Banner({me, version, appVersion, totalUnread, recent, cwd, colum
 	if (total < 64) {
 		const inner = total - 4;
 		const rows: Line[] = [
-			[{text: '✻ ', color: accent}, {text: greeting, bold: true}],
+			[{text: '✻ ', color: theme.kakao}, {text: greeting, bold: true}],
 			[],
 			[{text: '  /help 도움말 · /chats 채팅방 열기', color: theme.secondary}],
 			[],
@@ -95,7 +109,7 @@ export function Banner({me, version, appVersion, totalUnread, recent, cwd, colum
 		[],
 		[{text: greeting, bold: true}],
 		[],
-		...MASCOT.map(m => [{text: m, color: accent}]),
+		...mascot(),
 		[],
 		[{text: demo ? 'Demo mode · 가상 데이터' : `KakaoTalk ${version ?? ''}${unread}`, color: theme.secondary}],
 		[{text: shortCwd, color: theme.secondary}],

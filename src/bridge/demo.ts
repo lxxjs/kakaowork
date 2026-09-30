@@ -1,4 +1,4 @@
-import {formatClock} from '../lib/time.js';
+import {formatClock, isoDay} from '../lib/time.js';
 import {BridgeError, type Bridge, type BridgeEvent, type ChatRoom, type Message} from './types.js';
 
 type DemoRoom = ChatRoom & {log: Message[]; open: boolean};
@@ -14,7 +14,7 @@ function seed(): DemoRoom[] {
 		{
 			index: 0, name: '민지', time: '오후 3:28', preview: '7시 어때?', unread: 2, muted: false, kind: 'direct', open: false,
 			log: [
-				msg('divider', '', false),
+				msg('divider', '', false, undefined, undefined, {date: isoDay(new Date())}),
 				msg('text', '오늘 저녁 뭐 먹을래?', true, undefined, '오후 3:20'),
 				msg('text', '음 글쎄', false, '민지'),
 				msg('text', '파스타 어때', false, '민지', '오후 3:25'),

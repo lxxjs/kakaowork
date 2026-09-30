@@ -1,8 +1,10 @@
-// Claude Code's dark palette, with KakaoTalk yellow available as the accent.
+// Claude Code's dark palette with KakaoTalk yellow as the accent (Claude orange via --theme claude).
 export const theme = {
-	accent: 'rgb(215,119,87)',
-	accentShimmer: 'rgb(235,159,127)',
-	kakao: 'rgb(254,229,0)',
+	// KakaoTalk yellow, toned down toward Claude orange's warmth (S ~70%, L ~62%).
+	accent: 'rgb(226,196,92)',
+	accentShimmer: 'rgb(240,220,152)',
+	kakao: 'rgb(226,196,92)',
+	blush: 'rgb(255,150,170)',
 	text: 'rgb(255,255,255)',
 	secondary: 'rgb(153,153,153)',
 	border: 'rgb(136,136,136)',
@@ -10,11 +12,12 @@ export const theme = {
 	success: 'rgb(78,186,101)',
 	error: 'rgb(255,107,128)',
 	warning: 'rgb(255,193,7)',
+	userBackground: 'rgb(55,55,55)',
 };
 
-export function useKakaoAccent() {
-	theme.accent = 'rgb(254,229,0)';
-	theme.accentShimmer = 'rgb(255,243,150)';
+export function useClaudeAccent() {
+	theme.accent = 'rgb(215,119,87)';
+	theme.accentShimmer = 'rgb(235,159,127)';
 }
 
 const senderPalette = [

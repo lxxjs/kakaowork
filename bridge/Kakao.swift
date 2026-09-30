@@ -13,8 +13,16 @@ final class Kakao {
     static let bundleID = "com.kakao.KakaoTalkMac"
     private static let returnKey: CGKeyCode = 36
     private static let sendTitles: Set<String> = ["전송", "Send"]
+    private static let inputLabels: Set<String> = ["메시지 입력", "Enter a message", "Message"]
 
     private var cached: (pid: pid_t, element: AXUIElement)?
+
+    /// Keep KakaoTalk hidden: re-hide it after it had to come forward, and whenever the
+    /// user switches away from it.
+    var keepHidden = false
+
+    /// The app that launched us (the terminal), where focus goes back to.
+    private let homeBundleID = ProcessInfo.processInfo.environment["__CFBundleIdentifier"]
 
     var app: NSRunningApplication? {
         NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID).first
@@ -38,14 +46,17 @@ final class Kakao {
 
     // MARK: main window / chat list
 
-    func mainWindow() throws -> AXUIElement {
+    /// - Parameter reopen: bring the main window back if it was closed. Polling passes false
+    ///   so a closed window never makes KakaoTalk flash repeatedly.
+    func mainWindow(reopen: Bool = true) throws -> AXUIElement {
         func find() throws -> AXUIElement? { try windows().first { $0.identifier == "Main Window" } }
         if let w = try find() { return w }
+        guard reopen else { throw BridgeError("no_main_window", "카카오톡 메인 창이 닫혀 있습니다") }
 
         // The main window was closed. "창 > 채팅" (⌘2) reopens it while KakaoTalk is active;
         // the menu bar icon's "카카오톡 열기" also works when it is not.
-        let previous = NSWorkspace.shared.frontmostApplication
-        defer { restoreFront(previous) }
+        let previous = frontmostApp()
+        defer { handBack(to: previous) }
         try pressMenu(["창", "Window"], item: ["채팅", "Chats"])
         for _ in 0..<10 {
             usleep(100_000)
@@ -62,19 +73,59 @@ final class Kakao {
             : "카카오톡 메인 창을 찾을 수 없습니다 · 카카오톡 창을 한 번 열어 주세요")
     }
 
-    private func restoreFront(_ previous: NSRunningApplication?) {
-        guard let previous, let kakao = app, previous.processIdentifier != kakao.processIdentifier,
-              kakao.isActive else { return }
-        let front = AXUIElementCreateApplication(previous.processIdentifier)
-        if front.set(kAXFrontmostAttribute, kCFBooleanTrue) != .success { previous.activate() }
+    // MARK: focus
+
+    // NSRunningApplication's isActive/isHidden lag behind (they update on the main run loop),
+    // so ask the Accessibility API, which answers live.
+    func isHidden() -> Bool { (try? axApp())?.attribute(kAXHiddenAttribute) as? Bool ?? false }
+    func isFrontmost() -> Bool { (try? axApp())?.attribute(kAXFrontmostAttribute) as? Bool ?? false }
+
+    func frontmostApp() -> NSRunningApplication? {
+        if let focused = AXUIElementCreateSystemWide().attribute(kAXFocusedApplicationAttribute) {
+            var pid: pid_t = 0
+            if AXUIElementGetPid(focused as! AXUIElement, &pid) == .success, let app = NSRunningApplication(processIdentifier: pid) { return app }
+        }
+        return NSWorkspace.shared.frontmostApplication
+    }
+
+    /// Unhides KakaoTalk and makes it frontmost, for the few things that need real key focus.
+    private func bringForward() throws {
+        let app = try axApp()
+        if isHidden() {
+            app.set(kAXHiddenAttribute, kCFBooleanFalse)
+            usleep(150_000)
+        }
+        app.set(kAXFrontmostAttribute, kCFBooleanTrue)
+    }
+
+    /// Gives focus back to where the user was and, in keep-hidden mode, hides KakaoTalk again.
+    /// Activating first matters: hiding the frontmost app lets macOS pick the next one.
+    func handBack(to previous: NSRunningApplication?) {
+        guard let kakao = app else { return }
+        var target = previous
+        if target == nil || target?.processIdentifier == kakao.processIdentifier {
+            target = keepHidden ? homeBundleID.flatMap { NSRunningApplication.runningApplications(withBundleIdentifier: $0).first } : nil
+        }
+        if let target, target.processIdentifier != kakao.processIdentifier, isFrontmost() {
+            let front = AXUIElementCreateApplication(target.processIdentifier)
+            if front.set(kAXFrontmostAttribute, kCFBooleanTrue) != .success { target.activate() }
+            usleep(100_000)
+        }
+        if keepHidden { (try? axApp())?.set(kAXHiddenAttribute, kCFBooleanTrue) }
+    }
+
+    /// Called from polling: once the user has left KakaoTalk, tuck it away again.
+    func enforceHidden() {
+        guard keepHidden, app != nil, !isHidden(), !isFrontmost() else { return }
+        (try? axApp())?.set(kAXHiddenAttribute, kCFBooleanTrue)
     }
 
     /// The chat list table in the main window, switching to the chats tab if needed.
-    func chatList() throws -> (scroll: AXUIElement, table: AXUIElement) {
-        if let found = try findChatList(in: mainWindow()) { return found }
+    func chatList(reopen: Bool = true) throws -> (scroll: AXUIElement, table: AXUIElement) {
+        if let found = try findChatList(in: mainWindow(reopen: reopen)) { return found }
         try pressMenu(["창", "Window"], item: ["채팅", "Chats"])
         usleep(300_000)
-        if let found = try findChatList(in: mainWindow()) { return found }
+        if let found = try findChatList(in: mainWindow(reopen: reopen)) { return found }
         throw BridgeError("no_chat_list", "채팅 목록을 찾을 수 없습니다")
     }
 
@@ -95,8 +146,8 @@ final class Kakao {
         return nil
     }
 
-    func totalUnread() -> Int? {
-        guard let main = try? mainWindow() else { return nil }
+    func totalUnread(reopen: Bool = true) -> Int? {
+        guard let main = try? mainWindow(reopen: reopen) else { return nil }
         let kids = main.children
         guard let button = kids.first(where: { $0.identifier == "chatrooms" }) else { return nil }
         let bf = button.frame
@@ -130,7 +181,7 @@ final class Kakao {
 
     /// Only the rows currently on screen — cheap enough to poll.
     func visibleChats() throws -> [ChatRoom] {
-        let (_, table) = try chatList()
+        let (_, table) = try chatList(reopen: false)
         return visibleRows(table).compactMap { row in
             guard let index = row.attribute("AXIndex") as? Int else { return nil }
             return Parse.chatRow(row, index: index)
@@ -154,11 +205,15 @@ final class Kakao {
         return nil
     }
 
+    /// The message composer. Other text areas can appear in a chat window (the in-chat
+    /// search bar, a reply preview), so prefer the labelled one, then the lowest one.
     private func inputArea(in window: AXUIElement) -> AXUIElement? {
-        for scroll in window.children where scroll.role == "AXScrollArea" {
-            if let area = scroll.children.first(where: { $0.role == "AXTextArea" }) { return area }
+        let areas = window.children.filter { $0.role == "AXScrollArea" }
+            .flatMap { $0.children.filter { $0.role == "AXTextArea" } }
+        if let labelled = areas.first(where: { Self.inputLabels.contains($0.attribute(kAXDescriptionAttribute) as? String ?? "") }) {
+            return labelled
         }
-        return nil
+        return areas.max { $0.frame.maxY < $1.frame.maxY }
     }
 
     private func requireWindow(_ title: String) throws -> AXUIElement {
@@ -179,21 +234,18 @@ final class Kakao {
             throw BridgeError("not_found", "'\(name)' 채팅방을 찾을 수 없습니다")
         }
 
-        let previous = NSWorkspace.shared.frontmostApplication
-        let wasHidden = kakao.isHidden
+        let previous = frontmostApp()
+        let wasHidden = isHidden()
         defer {
-            if let previous, previous.processIdentifier != kakao.processIdentifier {
-                let front = AXUIElementCreateApplication(previous.processIdentifier)
-                if front.set(kAXFrontmostAttribute, kCFBooleanTrue) != .success { previous.activate() }
-            }
-            if wasHidden { app.set(kAXHiddenAttribute, kCFBooleanTrue) }
+            handBack(to: previous)
+            if wasHidden && !keepHidden { app.set(kAXHiddenAttribute, kCFBooleanTrue) }
         }
 
         // Opening a room needs a real Return keypress in the chat list, so KakaoTalk has to
         // be frontmost with the list focused. Focus is verified before the key is sent so a
         // stray Return can never land in some chat's input field.
         let main = try mainWindow()
-        app.set(kAXFrontmostAttribute, kCFBooleanTrue)
+        try bringForward()
         main.perform(kAXRaiseAction)
         main.set(kAXMainAttribute, kCFBooleanTrue)
         table.set(kAXFocusedAttribute, kCFBooleanTrue)
@@ -279,7 +331,22 @@ final class Kakao {
             }
         }
         Kakao.fillSenders(&list, carry: carry)
+        Kakao.fillDividerDates(&list)
         return (list, rows.count)
+    }
+
+    /// Date separators expose no text, but every day's messages carry their date on
+    /// their time labels — so a separator takes the date of the next labelled message.
+    static func fillDividerDates(_ list: inout [Message]) {
+        var next: String?
+        for i in list.indices.reversed() {
+            if list[i].kind == "divider" {
+                if list[i].date == nil { list[i].date = next }
+                next = nil
+            } else if let date = list[i].date {
+                next = date
+            }
+        }
     }
 
     static func fillSenders(_ list: inout [Message], carry: String?) {
@@ -306,18 +373,28 @@ final class Kakao {
         let draft = input.string ?? ""
         defer { if !draft.isEmpty { input.set(kAXValueAttribute, draft as CFString) } }
 
-        guard input.set(kAXValueAttribute, text as CFString) == .success else {
-            throw BridgeError("send_failed", "입력창에 메시지를 넣지 못했습니다")
+        // The send button only enables once KakaoTalk has processed the text change (~50–300ms).
+        func fill() throws -> Bool {
+            guard input.set(kAXValueAttribute, text as CFString) == .success else {
+                throw BridgeError("send_failed", "입력창에 메시지를 넣지 못했습니다")
+            }
+            for _ in 0..<30 {
+                usleep(50_000)
+                if send.attribute(kAXEnabledAttribute) as? Bool == true { return true }
+            }
+            return false
         }
-        // The send button only enables once KakaoTalk has processed the text change (~50–150ms).
-        var enabled = false
-        for _ in 0..<30 {
-            usleep(50_000)
-            if send.attribute(kAXEnabledAttribute) as? Bool == true { enabled = true; break }
+        var enabled = try fill()
+        if !enabled {
+            // Give the composer focus and try once more before giving up.
+            input.set(kAXValueAttribute, "" as CFString)
+            input.set(kAXFocusedAttribute, kCFBooleanTrue)
+            usleep(100_000)
+            enabled = try fill()
         }
         guard enabled else {
             input.set(kAXValueAttribute, "" as CFString)
-            throw BridgeError("send_failed", "전송 버튼이 활성화되지 않았습니다")
+            throw BridgeError("send_failed", "전송 버튼이 활성화되지 않았습니다\(blockers(window))")
         }
         // KakaoTalk reports failure for AXPress even when it sends, so check the input instead.
         send.perform(kAXPressAction)
@@ -329,11 +406,36 @@ final class Kakao {
         throw BridgeError("send_failed", "전송되지 않았습니다")
     }
 
+    /// Explains what in KakaoTalk might be stopping a send, for the error message.
+    private func blockers(_ window: AXUIElement) -> String {
+        var reasons: [String] = []
+        if window.attribute(kAXMinimizedAttribute) as? Bool == true { reasons.append("채팅창이 최소화되어 있음") }
+        if window.children.contains(where: { $0.role == "AXSheet" }) { reasons.append("채팅창에 대화상자가 열려 있음") }
+        if let windows = try? windows(), windows.contains(where: {
+            let sub = $0.attribute(kAXSubroleAttribute) as? String
+            return sub == kAXDialogSubrole || sub == kAXSystemDialogSubrole
+        }) {
+            reasons.append("카카오톡에 대화상자가 열려 있음")
+        }
+        if let focused = (try? axApp())?.attribute(kAXFocusedUIElementAttribute).map({ $0 as! AXUIElement }),
+           ["AXMenu", "AXMenuItem"].contains(focused.role) {
+            reasons.append("카카오톡 메뉴가 열려 있음")
+        }
+        let areas = window.children.filter { $0.role == "AXScrollArea" }.flatMap { $0.children.filter { $0.role == "AXTextArea" } }
+        if areas.count > 1 { reasons.append("입력창이 \(areas.count)개로 보임") }
+        return reasons.isEmpty ? "" : " (\(reasons.joined(separator: ", ")))"
+    }
+
     // MARK: app visibility
 
     func setHidden(_ hidden: Bool) throws {
         let app = try axApp()
-        app.set(kAXHiddenAttribute, hidden ? kCFBooleanTrue : kCFBooleanFalse)
+        keepHidden = hidden
+        if hidden, isFrontmost() {
+            handBack(to: nil)  // hands focus to the terminal, then hides
+        } else {
+            app.set(kAXHiddenAttribute, hidden ? kCFBooleanTrue : kCFBooleanFalse)
+        }
     }
 
     /// Presses an item in KakaoTalk's menu bar icon menu. Titles must match exactly —

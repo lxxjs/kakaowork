@@ -162,8 +162,10 @@ final class Server {
             } catch {}
         }
 
+        kakao.enforceHidden()
+
         if watchChats && tick % 2 == 0, let rooms = try? kakao.visibleChats() {
-            let total = kakao.totalUnread()
+            let total = kakao.totalUnread(reopen: false)
             let signature = rooms.map { "\($0.name)|\($0.unread)|\($0.time)|\($0.preview)" }.joined(separator: "\n") + "#\(total ?? -1)"
             if signature != chatSignature {
                 chatSignature = signature

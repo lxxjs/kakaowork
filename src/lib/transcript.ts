@@ -4,10 +4,11 @@ export type ToolStatus = 'ok' | 'error' | 'info';
 
 export type Item =
 	| {id: number; type: 'banner'; me?: string | null; version?: string; totalUnread?: number | null; recent: ChatRoom[]; demo: boolean}
-	| {id: number; type: 'message'; message: Message; header: boolean; showTime: boolean; group: boolean}
+	| {id: number; type: 'message'; message: Message; first: boolean; showTime: boolean; group: boolean}
 	| {id: number; type: 'tool'; title: string; arg?: string; lines: string[]; status: ToolStatus}
 	| {id: number; type: 'notice'; room: string; count: number; preview: string}
 	| {id: number; type: 'text'; text: string; tone?: 'dim' | 'error' | 'warning'}
+	| {id: number; type: 'prompt'; text: string}
 	| {id: number; type: 'help'};
 
 export type NewItem = Item extends infer T ? (T extends Item ? Omit<T, 'id'> : never) : never;
@@ -53,13 +54,17 @@ export function fillTimes(messages: Message[]): Message[] {
 	return out;
 }
 
-/** Tracks the previous bubble so consecutive ones from the same sender collapse under one header. */
+/**
+ * Folds consecutive bubbles from one sender into a single block, the way Claude Code
+ * shows one response under one bullet. Times are shown when the minute changes.
+ */
 export class Grouper {
 	private who?: string;
 	private time?: string;
 
 	constructor(private readonly group: boolean) {}
 
+	/** Starts a new block even for the same sender — after a notice or tool line, say. */
 	reset() {
 		this.who = undefined;
 		this.time = undefined;
@@ -67,14 +72,11 @@ export class Grouper {
 
 	next(message: Message): Item {
 		const s = speaker(message);
-		const sameSpeaker = s !== undefined && s === this.who;
-		const sameTime = !message.time || message.time === this.time;
-		const header = !message.mine && !(sameSpeaker && sameTime);
-		const showTime = Boolean(message.time) && !(sameSpeaker && sameTime);
+		const first = s === undefined || s !== this.who;
+		const showTime = Boolean(message.time) && (first || message.time !== this.time);
 		this.who = s;
-		if (message.time) this.time = message.time;
-		if (s === undefined) this.time = undefined;
-		return item({type: 'message', message, header, showTime, group: this.group});
+		this.time = s === undefined ? undefined : message.time ?? this.time;
+		return item({type: 'message', message, first, showTime, group: this.group});
 	}
 }
 

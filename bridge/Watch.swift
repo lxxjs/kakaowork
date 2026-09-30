@@ -68,6 +68,7 @@ extension Kakao {
             fresh = Array(window[(known + 1)...])
         }
         Kakao.fillSenders(&fresh, carry: room.lastSender)
+        Kakao.fillDividerDates(&fresh)
         room.record(fresh)
         room.lastIndex = lastIndex
         room.lastSignature = lastMessage.signature

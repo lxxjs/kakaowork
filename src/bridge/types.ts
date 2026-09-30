@@ -21,6 +21,8 @@ export interface Message {
 	text: string;
 	detail?: string;
 	time?: string;
+	/** ISO day, e.g. "2026-09-30". On a divider, the day it opens. */
+	date?: string;
 	unread?: number;
 }
 

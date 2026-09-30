@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import * as ed from '../dist/lib/editor.js';
 import {chosung, filterRooms, score} from '../dist/lib/fuzzy.js';
+import {formatDay} from '../dist/lib/time.js';
 import {fillTimes, Grouper} from '../dist/lib/transcript.js';
 import {wrapRows} from '../dist/lib/text.js';
 import {layout} from '../dist/ui/PromptInput.js';
@@ -66,7 +67,7 @@ test('fillTimes gives a run the time of its labelled last bubble', () => {
 	assert.deepEqual(out.map(x => x.time), ['오후 3:25', '오후 3:25', '오후 3:27', '오후 3:27', undefined, undefined]);
 });
 
-test('Grouper collapses same-sender same-minute bubbles under one header', () => {
+test('Grouper folds a sender\'s consecutive bubbles into one block', () => {
 	const g = new Grouper(true);
 	const items = [
 		m('a', {sender: '민지', time: '오후 3:25'}),
@@ -76,7 +77,7 @@ test('Grouper collapses same-sender same-minute bubbles under one header', () =>
 		m('e', {mine: true, time: '오후 3:26'}),
 		m('f', {mine: true, time: '오후 3:26'}),
 	].map(x => g.next(x));
-	assert.deepEqual(items.map(i => i.header), [true, false, true, true, false, false]);
+	assert.deepEqual(items.map(i => i.first), [true, false, false, true, true, false]);
 	assert.deepEqual(items.map(i => i.showTime), [true, false, true, true, true, false]);
 });
 
@@ -93,4 +94,10 @@ test('prompt layout puts the caret on the right wrapped row and column', () => {
 	assert.deepEqual(caret, {row: 1, column: 2});
 	assert.deepEqual(layout({value, cursor: 4}, 11).caret, {row: 1, column: 0});
 	assert.deepEqual(layout({value, cursor: value.length}, 11).caret, {row: 2, column: 2});
+});
+
+test('formatDay spells out a separator date with its weekday', () => {
+	assert.equal(formatDay('2026-09-30'), '2026년 9월 30일 수요일');
+	assert.equal(formatDay('2026-01-04'), '2026년 1월 4일 일요일');
+	assert.equal(formatDay('not a date'), 'not a date');
 });

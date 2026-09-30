@@ -54,7 +54,7 @@ export function PromptInput({editor, placeholder, columns, focused}: Props) {
 			<Text color={theme.border}>{rule}</Text>
 			{editor.value === '' ? (
 				<Box>
-					<Text color={theme.secondary}>{'> '}</Text>
+					<Text color={theme.secondary}>{'❯ '}</Text>
 					<Text color={theme.secondary} wrap="truncate-end">
 						{placeholder}
 					</Text>
@@ -62,7 +62,7 @@ export function PromptInput({editor, placeholder, columns, focused}: Props) {
 			) : (
 				rows.map((row, i) => (
 					<Box key={i}>
-						<Text color={theme.secondary}>{row.first ? '> ' : '  '}</Text>
+						<Text color={theme.secondary}>{row.first ? '❯ ' : '  '}</Text>
 						<Text>{row.text}</Text>
 					</Box>
 				))

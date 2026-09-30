@@ -1,10 +1,12 @@
 import {Box, Text} from 'ink';
 import type {Message} from '../bridge/types.js';
+import {width} from '../lib/text.js';
+import {formatDay} from '../lib/time.js';
 import type {Item} from '../lib/transcript.js';
 import {Banner} from './Banner.js';
 import {senderColor, theme} from './theme.js';
 
-type Context = {columns: number; cwd: string; appVersion: string};
+export type Context = {columns: number; cwd: string; appVersion: string};
 
 function Body({message}: {message: Message}) {
 	switch (message.kind) {
@@ -29,10 +31,17 @@ function MessageView({item, columns}: {item: Extract<Item, {type: 'message'}>; c
 	const m = item.message;
 
 	if (m.kind === 'divider') {
+		// A rule with the day centered on it, like KakaoTalk's date separator.
+		const span = Math.max(12, Math.min(columns - 4, 56));
+		const label = m.date ? ` ${formatDay(m.date)} ` : '';
+		const left = Math.max(2, Math.floor((span - width(label)) / 2));
+		const right = Math.max(2, span - left - width(label));
 		return (
 			<Box marginTop={1} paddingLeft={2}>
-				<Text color={theme.secondary} dimColor>
-					{'─'.repeat(Math.max(8, Math.min(columns - 4, 48)))}
+				<Text color={theme.secondary}>
+					{'─'.repeat(left)}
+					{label}
+					{'─'.repeat(right)}
 				</Text>
 			</Box>
 		);
@@ -54,15 +63,16 @@ function MessageView({item, columns}: {item: Extract<Item, {type: 'message'}>; c
 	);
 
 	if (m.mine) {
-		// Your own messages read like prompts you typed into Claude Code.
+		// Your own messages sit on a shaded band, like prompts in Claude Code's transcript.
+		// Consecutive ones share the band, so a burst reads as one block.
 		return (
-			<Box marginTop={item.showTime ? 1 : 0}>
+			<Box marginTop={item.first ? 1 : 0} width={columns} backgroundColor={theme.userBackground}>
 				<Box width={2} flexShrink={0}>
-					<Text color={theme.secondary}>&gt;</Text>
+					<Text color={theme.secondary}>{item.first ? '❯' : ' '}</Text>
 				</Box>
-				<Box flexGrow={1}>
-					<Text color={theme.secondary}>
-						{m.kind === 'text' ? m.text : <Body message={m} />}
+				<Box flexGrow={1} flexShrink={1}>
+					<Text color={theme.text}>
+						<Body message={m} />
 						{meta}
 					</Text>
 				</Box>
@@ -70,24 +80,22 @@ function MessageView({item, columns}: {item: Extract<Item, {type: 'message'}>; c
 		);
 	}
 
+	// Everyone else's burst sits under one bullet, like a single Claude Code response.
 	const name = m.sender ?? '…';
 	return (
-		<Box flexDirection="column" marginTop={item.header ? 1 : 0}>
-			{item.header ? (
-				<Box>
-					<Box width={2} flexShrink={0}>
-						<Text color={theme.text}>⏺</Text>
-					</Box>
-					<Text bold color={item.group ? senderColor(name) : undefined}>
-						{name}
-					</Text>
-					{m.time ? <Text color={theme.secondary}> · {m.time}</Text> : null}
-				</Box>
-			) : null}
-			<Box paddingLeft={2}>
+		<Box marginTop={item.first ? 1 : 0}>
+			<Box width={2} flexShrink={0}>
+				<Text color={theme.text}>{item.first ? '⏺' : ' '}</Text>
+			</Box>
+			<Box flexGrow={1} flexShrink={1}>
 				<Text>
+					{item.first && item.group ? (
+						<Text bold color={senderColor(name)}>
+							{name}{' '}
+						</Text>
+					) : null}
 					<Body message={m} />
-					{m.unread ? <Text color={theme.kakao}> {m.unread}</Text> : null}
+					{meta}
 				</Text>
 			</Box>
 		</Box>
@@ -122,7 +130,7 @@ const HELP: Array<[string, string]> = [
 	['/open <이름>', '채팅방 바로 열기 (예: /open ㄱㅈ)'],
 	['/more [개수]', '이전 메시지 더 불러오기 (PgUp)'],
 	['/close', '현재 채팅방 닫기'],
-	['/hide · /show', '카카오톡 창 숨기기 · 보이기'],
+	['/hide · /show', '카카오톡 창 숨김 모드 켜기 · 끄기'],
 	['/notify [on|off]', '다른 방 새 메시지 알림'],
 	['/status', '연결 상태'],
 	['/clear', '화면 지우기'],
@@ -204,6 +212,15 @@ export function TranscriptItem({item, context}: {item: Item; context: Context}) 
 				</Box>
 			);
 		}
+		case 'prompt':
+			return (
+				<Box marginTop={1} width={context.columns} backgroundColor={theme.userBackground}>
+					<Box width={2} flexShrink={0}>
+						<Text color={theme.secondary}>❯</Text>
+					</Box>
+					<Text color={theme.text}>{item.text}</Text>
+				</Box>
+			);
 		case 'help':
 			return <HelpView />;
 	}
