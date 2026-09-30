@@ -133,3 +133,7 @@ scripts/release.sh            # patch 버전 릴리스 (minor, major, 1.2.3 도 
 ```
 
 한 번에 버전 올리기 → 빌드·테스트 → GitHub 릴리스(`.tgz` 첨부) → [`lxxjs/homebrew-tap`](https://github.com/lxxjs/homebrew-tap)의 Formula 갱신까지 합니다. Formula 원본은 `packaging/kakaowork.rb`입니다.
+
+## 라이선스
+
+[MIT](LICENSE)
