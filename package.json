@@ -1,6 +1,6 @@
 {
   "name": "@lxxjs/kakaowork",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "KakaoTalk for macOS, in your terminal — with a Claude Code–style UI",
   "type": "module",
   "bin": {
