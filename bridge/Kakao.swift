@@ -103,12 +103,16 @@ final class Kakao {
 
     /// Gives focus back to where the user was and, in keep-hidden mode, hides KakaoTalk again.
     /// Activating first matters: hiding the frontmost app lets macOS pick the next one.
+    /// The app to give focus back to: where the user was, or else the terminal running us.
+    private func userApp(_ previous: NSRunningApplication?) -> NSRunningApplication? {
+        guard let kakao = app else { return previous }
+        if let previous, previous.processIdentifier != kakao.processIdentifier { return previous }
+        return keepHidden ? homeBundleID.flatMap { NSRunningApplication.runningApplications(withBundleIdentifier: $0).first } : nil
+    }
+
     func handBack(to previous: NSRunningApplication?) {
         guard let kakao = app else { return }
-        var target = previous
-        if target == nil || target?.processIdentifier == kakao.processIdentifier {
-            target = keepHidden ? homeBundleID.flatMap { NSRunningApplication.runningApplications(withBundleIdentifier: $0).first } : nil
-        }
+        let target = userApp(previous)
         // Hiding first takes KakaoTalk off screen at once; macOS then hands focus to the app
         // that was active before it, and we make sure it is the one the user was in.
         if keepHidden { (try? axApp())?.set(kAXHiddenAttribute, kCFBooleanTrue) }
@@ -132,6 +136,65 @@ final class Kakao {
     private func trace(_ what: String) {
         guard ProcessInfo.processInfo.environment["KAKAOWORK_DEBUG"] != nil else { return }
         FileHandle.standardError.write(String(format: "%.3f %@\n", Date().timeIntervalSince1970, what).data(using: .utf8)!)
+    }
+
+    /// KakaoTalk unhides itself once more as it finishes putting a room's window up; hide it
+    /// again whenever that happens, in the background so the open can return right away.
+    private func keepHidden(_ app: AXUIElement, for seconds: TimeInterval) {
+        Thread {
+            let until = Date().addingTimeInterval(seconds)
+            while Date() < until {
+                if app.attribute(kAXHiddenAttribute) as? Bool == false {
+                    app.set(kAXHiddenAttribute, kCFBooleanTrue)
+                    self.trace("KakaoTalk unhid itself; hidden again")
+                }
+                usleep(3_000)
+            }
+        }.start()
+    }
+
+    /// Watches the window server (not the Accessibility tree, which waits on KakaoTalk while it
+    /// is busy putting the window up) for the room's new window, and brings the user's app
+    /// back in front of it the frame it appears. Raising the user's app is handled by that
+    /// app, so it lands even while KakaoTalk is too busy to be hidden.
+    private func coverNewWindow(of pid: pid_t, with user: NSRunningApplication?) -> WindowWatch? {
+        guard let user, user.processIdentifier != pid else { return nil }
+        let before = onScreenWindowIDs(pid)
+        let watch = WindowWatch()
+        let front = AXUIElementCreateApplication(user.processIdentifier)
+        Thread {
+            let deadline = Date().addingTimeInterval(4)
+            while !watch.stopped && Date() < deadline {
+                if self.onScreenWindowIDs(pid).contains(where: { !before.contains($0) }) {
+                    front.set(kAXFrontmostAttribute, kCFBooleanTrue)
+                    self.trace("new window on screen; raised \(user.localizedName ?? "user app") over it")
+                    // KakaoTalk activates itself while it shows the window; if that lands after
+                    // our raise it ends up on top again, so keep the user's app in front a while.
+                    // (Asking the user's app is cheap even while KakaoTalk is busy.)
+                    let until = Date().addingTimeInterval(0.4)
+                    while !watch.stopped && Date() < until {
+                        if front.attribute(kAXFrontmostAttribute) as? Bool != true {
+                            front.set(kAXFrontmostAttribute, kCFBooleanTrue)
+                            self.trace("KakaoTalk came back on top; raised user app again")
+                        }
+                        usleep(2_000)
+                    }
+                    return
+                }
+                usleep(2_000)
+            }
+        }.start()
+        return watch
+    }
+
+    /// KakaoTalk's normal-level windows currently drawn on screen, straight from the window server.
+    private func onScreenWindowIDs(_ pid: pid_t) -> Set<CGWindowID> {
+        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        return Set(list.compactMap { info -> CGWindowID? in
+            guard (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid,
+                  (info[kCGWindowLayer as String] as? NSNumber)?.intValue == 0 else { return nil }
+            return (info[kCGWindowNumber as String] as? NSNumber).map { CGWindowID($0.uint32Value) }
+        })
     }
 
     // MARK: parking
@@ -318,7 +381,6 @@ final class Kakao {
     func open(name: String, hint: Int?) throws -> [String: Any] {
         if try chatWindow(title: name) != nil { return ["title": name, "alreadyOpen": true] }
         let app = try axApp()
-        guard let kakao = self.app else { throw BridgeError("not_running", "카카오톡이 실행 중이 아닙니다") }
         let (scroll, table) = try chatList()
         guard let index = findRow(named: name, hint: hint, scroll: scroll, table: table) else {
             throw BridgeError("not_found", "'\(name)' 채팅방을 찾을 수 없습니다")
@@ -337,9 +399,29 @@ final class Kakao {
             if wasHidden && !keepHidden { app.set(kAXHiddenAttribute, kCFBooleanTrue) }
         }
 
-        // Opening a room needs a real Return keypress in the chat list, so KakaoTalk has to
-        // be frontmost with the list focused. Focus is verified before the key is sent so a
-        // stray Return can never land in some chat's input field.
+        // Quietly first: the user's app gets the front back right after the key, so KakaoTalk
+        // builds the room's window behind it. Should KakaoTalk lose the key that way, press
+        // again the plain way.
+        for quiet in keepHidden ? [true, false] : [false] {
+            if try press(row: index, named: name, in: table, main: main, quiet: quiet, previous: previous) {
+                return ["title": name, "alreadyOpen": false]
+            }
+            trace("room did not open (quiet: \(quiet))")
+        }
+        throw BridgeError("open_timeout", "'\(name)' 채팅창이 열리지 않았습니다")
+    }
+
+    /// Selects a room in the chat list and presses Return on it; true once its window exists.
+    ///
+    /// Opening a room needs a real Return keypress in the chat list, so KakaoTalk has to be
+    /// frontmost with the list focused. Focus is verified before the key is sent so a stray
+    /// Return can never land in some chat's input field.
+    private func press(row index: Int, named name: String, in table: AXUIElement, main: AXUIElement,
+                       quiet: Bool, previous: NSRunningApplication?) throws -> Bool {
+        if try chatWindow(title: name) != nil { return true }
+        let app = try axApp()
+        guard let kakao = self.app else { throw BridgeError("not_running", "카카오톡이 실행 중이 아닙니다") }
+
         try bringForward()
         // Visible now: anything not sitting in the corner (first time, or macOS moved it) goes there.
         if keepHidden { for window in try windows() { park(window, visible: true) } }
@@ -371,36 +453,37 @@ final class Kakao {
         guard ready else { throw BridgeError("focus_failed", "카카오톡 채팅 목록에 포커스를 줄 수 없습니다") }
 
         let pid = kakao.processIdentifier
+        let watch = keepHidden ? coverNewWindow(of: pid, with: userApp(previous)) : nil
+        defer { if let watch { DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { watch.stop() } } }
         let source = CGEventSource(stateID: .privateState)
         CGEvent(keyboardEventSource: source, virtualKey: Self.returnKey, keyDown: true)?.postToPid(pid)
         CGEvent(keyboardEventSource: source, virtualKey: Self.returnKey, keyDown: false)?.postToPid(pid)
         trace("return sent")
+        // The key is already queued ahead of the deactivation this causes, so KakaoTalk still
+        // handles it — and then puts the room's window up as a background app, behind the user's.
+        if quiet, let user = userApp(previous) {
+            AXUIElementCreateApplication(user.processIdentifier).set(kAXFrontmostAttribute, kCFBooleanTrue)
+            trace("gave the front back to \(user.localizedName ?? "user app")")
+        }
 
-        // The room's window comes up wherever KakaoTalk last saved it — usually mid-screen —
-        // and macOS won't let a new window appear off screen. KakaoTalk creates the window a
-        // moment before it puts it on screen (unhiding itself to do so), so hide it as soon as
-        // the window exists and keep it hidden while KakaoTalk tries to show it; the room
-        // finishes loading in the background.
-        for _ in 0..<1300 {
+        // The room's window comes up wherever KakaoTalk last saved it, and macOS won't let a new
+        // window appear off screen. KakaoTalk creates the window a moment before it puts it on
+        // screen (unhiding itself to do so), so hide it as soon as the window exists and keep it
+        // hidden while KakaoTalk tries to show it; the room finishes loading in the background.
+        let deadline = Date().addingTimeInterval(quiet ? 2.5 : 4)
+        while Date() < deadline {
             usleep(3_000)
             if let window = try chatWindow(title: name) {
                 trace("chat window in AX tree, hidden=\(isHidden())")
                 if keepHidden {
                     app.set(kAXHiddenAttribute, kCFBooleanTrue)
                     park(window, visible: false)
-                    let until = Date().addingTimeInterval(0.6)
-                    while Date() < until {
-                        if !isHidden() {
-                            app.set(kAXHiddenAttribute, kCFBooleanTrue)
-                            trace("KakaoTalk unhid itself; hidden again")
-                        }
-                        usleep(3_000)
-                    }
+                    keepHidden(app, for: 0.6)
                 }
-                return ["title": name, "alreadyOpen": false]
+                return true
             }
         }
-        throw BridgeError("open_timeout", "'\(name)' 채팅창이 열리지 않았습니다")
+        return false
     }
 
     private func findRow(named name: String, hint: Int?, scroll: AXUIElement, table: AXUIElement) -> Int? {
@@ -699,4 +782,12 @@ final class Kakao {
             }
         }
     }
+}
+
+/// Lets `coverNewWindow`'s thread know the open is over.
+final class WindowWatch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+    var stopped: Bool { lock.lock(); defer { lock.unlock() }; return done }
+    func stop() { lock.lock(); done = true; lock.unlock() }
 }
