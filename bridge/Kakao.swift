@@ -353,7 +353,15 @@ final class Kakao {
     /// Parses a row and, if it shows a photo or emoticon, grabs the picture while it is on screen.
     func parseWithImage(_ row: AXUIElement, index: Int, window: AXUIElement, viewport: CGRect) -> Message? {
         guard var m = Parse.messageRow(row, index: index) else { return nil }
-        if let frame = m.imageFrame { m.image = capture.thumbnail(window: window, rect: frame, viewport: viewport) }
+        if var frame = m.imageFrame {
+            // Photos are drawn with rounded corners and a hairline border, so the full frame
+            // picks up the chat background at its edges; trim a little off every side.
+            if m.kind == "photo" {
+                let inset = max(3, min(frame.width, frame.height) * 0.03)
+                frame = frame.insetBy(dx: inset, dy: inset)
+            }
+            m.image = capture.thumbnail(window: window, rect: frame, viewport: viewport, attempts: m.kind == "emoticon" ? 3 : 8)
+        }
         return m
     }
 

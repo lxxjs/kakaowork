@@ -19,6 +19,8 @@ export interface Thumbnail {
 	h: number;
 	/** Base64 of packed 8-bit RGB, row-major. */
 	rgb: string;
+	/** Base64 PNG at close to full resolution, sent when the terminal can draw real images. */
+	png?: string;
 }
 
 export interface Message {
@@ -64,6 +66,8 @@ export interface Bridge {
 	watch(options: {chats?: boolean; stopRoom?: boolean}): Promise<void>;
 	close(title: string): Promise<void>;
 	setHidden(hidden: boolean): Promise<void>;
+	/** Turns picture capture on or off (off by default), and asks for sharp PNGs. */
+	configure(options: {capture?: boolean; sharp?: boolean}): Promise<void>;
 	on(listener: (event: BridgeEvent) => void): () => void;
 	dispose(): void;
 }

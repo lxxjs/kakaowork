@@ -4,6 +4,8 @@ import {App} from './app.js';
 import {ProcessBridge} from './bridge/client.js';
 import {DemoBridge} from './bridge/demo.js';
 import type {Bridge} from './bridge/types.js';
+import {deleteAll, detectKitty, detectSolid, graphics, imagesEnabled} from './lib/kitty.js';
+import {loadSettings} from './lib/settings.js';
 import {useClaudeAccent} from './ui/theme.js';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {version: string};
@@ -16,6 +18,8 @@ const USAGE = `kakaowork — 터미널에서 Claude Code 처럼 쓰는 카카오
 옵션
   --demo           카카오톡 없이 가상 데이터로 실행
   --no-hide        카카오톡 창을 숨기지 않고 그대로 두기
+  --images         사진·이모티콘을 그림으로 보기 (기본: [사진] 글자로만, 화면 기록 권한 필요)
+  --no-images      사진·이모티콘을 글자로만 보기
   --theme claude   강조색을 Claude 주황으로 (기본: kakao 노랑)
   -v, --version    버전
   -h, --help       도움말
@@ -25,7 +29,7 @@ const USAGE = `kakaowork — 터미널에서 Claude Code 처럼 쓰는 카카오
   · 터미널 앱에 손쉬운 사용(Accessibility) 권한이 필요합니다
 `;
 
-type Options = {demo: boolean; hide: boolean; theme: string; room?: string};
+type Options = {demo: boolean; hide: boolean; theme: string; images?: string; room?: string};
 
 function parse(argv: string[]): Options {
 	const options: Options = {demo: false, hide: true, theme: 'kakao'};
@@ -44,6 +48,12 @@ function parse(argv: string[]): Options {
 			options.hide = true;
 		} else if (arg === '--no-hide') {
 			options.hide = false;
+		} else if (arg === '--images') {
+			options.images = 'on';
+		} else if (arg.startsWith('--images=')) {
+			options.images = arg.slice('--images='.length);
+		} else if (arg === '--no-images') {
+			options.images = 'off';
 		} else if (arg === '--theme') {
 			options.theme = argv[++i] ?? 'kakao';
 		} else if (arg.startsWith('--theme=')) {
@@ -74,6 +84,14 @@ if (process.platform !== 'darwin' && !options.demo) {
 
 if (options.theme === 'claude') useClaudeAccent();
 
+// Ghostty and kitty can show real pictures; tell the bridge to send full-resolution PNGs.
+// Pictures are opt-in; when on, Ghostty and kitty get real images, Apple Terminal plain
+// background cells, everything else half-blocks.
+graphics.enabled = imagesEnabled(options.images, process.env, loadSettings().images);
+if (options.images && ['kitty', 'blocks', 'solid'].includes(options.images)) process.env.KAKAOWORK_IMAGES = options.images;
+graphics.kitty = detectKitty();
+graphics.solid = !graphics.kitty && detectSolid();
+
 let bridge: Bridge;
 try {
 	bridge = options.demo ? new DemoBridge() : new ProcessBridge();
@@ -93,7 +111,7 @@ const instance = render(
 const mouseOn = '\u001B[?1000h\u001B[?1006h';
 const mouseOff = '\u001B[?1000l\u001B[?1006l';
 process.stdout.write(mouseOn);
-process.on('exit', () => process.stdout.write(mouseOff));
+process.on('exit', () => process.stdout.write(mouseOff + (graphics.kitty ? deleteAll : '')));
 
 const shutdown = () => {
 	bridge.dispose();

@@ -105,6 +105,11 @@ final class Server {
             try kakao.close(title: title)
             return ["closed": true]
 
+        case "config":
+            if let enabled = req["capture"] as? Bool { kakao.capture.enabled = enabled }
+            if let sharp = req["sharp"] as? Bool { kakao.capture.sharp = sharp }
+            return ["capture": kakao.capture.enabled, "sharp": kakao.capture.sharp]
+
         case "hide", "show":
             try kakao.setHidden(cmd == "hide")
             return ["hidden": cmd == "hide"]

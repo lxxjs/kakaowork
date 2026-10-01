@@ -125,3 +125,82 @@ test('fitCells keeps pictures within 30 columns and 5 rows, preserving shape', (
 	assert.deepEqual(fitCells({w: 72, h: 96}, 'photo', 80), {columns: 8, rows: 5});
 	assert.deepEqual(fitCells({w: 48, h: 48}, 'emoticon', 80), {columns: 5, rows: 3}); // emoticons stay small
 });
+
+import {inflateSync} from 'node:zlib';
+import stringWidth from 'string-width';
+import {detectKitty, placeholderLines, transmit} from '../dist/lib/kitty.js';
+import {DIACRITICS} from '../dist/lib/kitty-diacritics.js';
+import {encodePng} from '../dist/lib/png.js';
+
+test('kitty placeholders: one cell per column, row and column marks, id in the colour', () => {
+	const lines = placeholderLines(0x010203, 3, 2);
+	assert.equal(lines.length, 2);
+	assert.ok(lines[0].startsWith('\u001B[38;2;1;2;3m') && lines[0].endsWith('\u001B[39m'));
+	const cells = [...lines[1].slice('\u001B[38;2;1;2;3m'.length, -'\u001B[39m'.length)];
+	assert.deepEqual(cells, [0, 1, 2].flatMap(column => ['\u{10EEEE}', DIACRITICS[1], DIACRITICS[column]]));
+	assert.equal(stringWidth(lines[0]), 3);
+	assert.equal(DIACRITICS.length, 297);
+});
+
+test('kitty transmit splits base64 into 4096-byte chunks, keys only on the first', () => {
+	const chunks = transmit(7, 'A'.repeat(9000), 20, 6).split('\u001B\\').filter(Boolean);
+	assert.equal(chunks.length, 3);
+	assert.ok(chunks[0].startsWith('\u001B_Ga=T,U=1,f=100,t=d,q=2,i=7,c=20,r=6,m=1;'));
+	assert.ok(chunks[1].startsWith('\u001B_Gm=1;'));
+	assert.ok(chunks[2].startsWith('\u001B_Gm=0;'));
+});
+
+test('detectKitty: Ghostty and kitty yes, others no, env override wins', () => {
+	assert.equal(detectKitty({TERM_PROGRAM: 'ghostty'}), true);
+	assert.equal(detectKitty({TERM: 'xterm-kitty'}), true);
+	assert.equal(detectKitty({TERM_PROGRAM: 'iTerm.app'}), false);
+	assert.equal(detectKitty({TERM_PROGRAM: 'ghostty', KAKAOWORK_IMAGES: 'blocks'}), false);
+});
+
+test('encodePng writes a valid RGB PNG', () => {
+	const png = encodePng(2, 1, Uint8Array.from([255, 0, 0, 0, 0, 255]));
+	assert.deepEqual([...png.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+	const idat = png.indexOf('IDAT');
+	const length = png.readUInt32BE(idat - 4);
+	assert.deepEqual([...inflateSync(png.subarray(idat + 4, idat + 4 + length))], [0, 255, 0, 0, 0, 0, 255]);
+});
+
+import {solidBlocks} from '../dist/lib/image.js';
+import {detectSolid} from '../dist/lib/kitty.js';
+
+test('solidBlocks paints one background-coloured space per cell', () => {
+	const image = {w: 2, h: 2, rgb: Buffer.from([255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255]).toString('base64')};
+	const lines = solidBlocks(image, {columns: 2, rows: 2});
+	assert.deepEqual(lines, ['\u001B[48;2;255;0;0m \u001B[48;2;0;255;0m \u001B[49m', '\u001B[48;2;0;0;255m \u001B[48;2;255;255;255m \u001B[49m']);
+	assert.equal(stringWidth(lines[0]), 2);
+});
+
+test('detectSolid: Apple Terminal, unless overridden', () => {
+	assert.equal(detectSolid({TERM_PROGRAM: 'Apple_Terminal'}), true);
+	assert.equal(detectSolid({TERM_PROGRAM: 'Apple_Terminal', KAKAOWORK_IMAGES: 'blocks'}), false);
+	assert.equal(detectSolid({TERM_PROGRAM: 'iTerm.app'}), false);
+});
+
+import {mkdtempSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {imagesEnabled} from '../dist/lib/kitty.js';
+import {loadSettings, saveSettings} from '../dist/lib/settings.js';
+
+test('imagesEnabled: off unless the flag, the env or the saved setting turns it on', () => {
+	assert.equal(imagesEnabled(undefined, {}, undefined), false);
+	assert.equal(imagesEnabled(undefined, {}, 'on'), true);
+	assert.equal(imagesEnabled('on', {}, 'off'), true);
+	assert.equal(imagesEnabled('off', {KAKAOWORK_IMAGES: 'kitty'}, 'on'), false);
+	assert.equal(imagesEnabled(undefined, {KAKAOWORK_IMAGES: 'solid'}, 'off'), true);
+	assert.equal(imagesEnabled(undefined, {KAKAOWORK_IMAGES: 'off'}, 'on'), false);
+});
+
+test('settings are saved as JSON and merged', () => {
+	const path = join(mkdtempSync(join(tmpdir(), 'kw-')), 'nested', 'settings.json');
+	assert.deepEqual(loadSettings(path), {});
+	saveSettings({images: 'on'}, path);
+	assert.deepEqual(loadSettings(path), {images: 'on'});
+	saveSettings({images: 'off'}, path);
+	assert.deepEqual(loadSettings(path), {images: 'off'});
+});

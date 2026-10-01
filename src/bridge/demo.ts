@@ -1,3 +1,4 @@
+import {encodePng} from '../lib/png.js';
 import {formatClock, isoDay} from '../lib/time.js';
 import {BridgeError, type Bridge, type BridgeEvent, type ChatRoom, type Message, type Thumbnail} from './types.js';
 
@@ -9,11 +10,17 @@ function msg(kind: Message['kind'], text: string, mine: boolean, sender?: string
 	return {row: 0, kind, text, mine, sender, time, ...extra};
 }
 
-/** Paints a thumbnail pixel by pixel, standing in for a captured picture. */
-function paint(w: number, h: number, pixel: (x: number, y: number) => [number, number, number]): Thumbnail {
+function raster(w: number, h: number, pixel: (x: number, y: number) => [number, number, number]): Buffer {
 	const rgb = Buffer.alloc(w * h * 3);
 	for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) rgb.set(pixel(x / w, y / h), (y * w + x) * 3);
-	return {w, h, rgb: rgb.toString('base64')};
+	return rgb;
+}
+
+/** Paints a thumbnail pixel by pixel, standing in for a captured picture (plus a sharp PNG). */
+function paint(w: number, h: number, pixel: (x: number, y: number) => [number, number, number]): Thumbnail {
+	const scale = 5;
+	const png = encodePng(w * scale, h * scale, raster(w * scale, h * scale, pixel)).toString('base64');
+	return {w, h, rgb: raster(w, h, pixel).toString('base64'), png};
 }
 
 const mix = (a: number[], b: number[], t: number) => a.map((v, i) => Math.round(v + (b[i] - v) * t)) as [number, number, number];
@@ -141,6 +148,8 @@ export class DemoBridge implements Bridge {
 	}
 
 	async setHidden() {}
+
+	async configure() {}
 
 	on(listener: (event: BridgeEvent) => void) {
 		this.listeners.add(listener);

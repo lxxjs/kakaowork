@@ -9,9 +9,10 @@ export type Cells = {columns: number; rows: number};
  *
  * @param available columns left for the message body
  */
-export function fitCells(image: Pick<Thumbnail, 'w' | 'h'>, kind: MessageKind, available: number): Cells {
-	// Kept small so a few pictures don't push the conversation off screen.
-	const limit = LIMITS[kind === 'emoticon' ? 'emoticon' : 'photo'];
+export function fitCells(image: Pick<Thumbnail, 'w' | 'h'>, kind: MessageKind, available: number, sharp = false): Cells {
+	// Kept small so a few pictures don't push the conversation off screen; real images
+	// (kitty graphics) get more room since the extra cells show actual detail.
+	const limit = (sharp ? SHARP_LIMITS : LIMITS)[kind === 'emoticon' ? 'emoticon' : 'photo'];
 	const maxColumns = Math.max(1, Math.min(available, limit.columns));
 	const columns = Math.max(1, Math.min(maxColumns, Math.round((limit.rows * 2 * image.w) / image.h)));
 	const rows = Math.max(1, Math.min(limit.rows, Math.round((columns * image.h) / image.w / 2)));
@@ -21,6 +22,11 @@ export function fitCells(image: Pick<Thumbnail, 'w' | 'h'>, kind: MessageKind, a
 const LIMITS = {
 	photo: {columns: 30, rows: 5}, // ~15 Hangul syllables wide (each is two columns)
 	emoticon: {columns: 5, rows: 3},
+};
+
+const SHARP_LIMITS = {
+	photo: {columns: 40, rows: 12},
+	emoticon: {columns: 10, rows: 5},
 };
 
 type Pixels = {w: number; h: number; data: Uint8Array};
@@ -74,6 +80,31 @@ export function halfBlocks(image: Thumbnail, {columns, rows}: Cells): string[] {
 		}
 
 		lines.push(line + '\u001B[39;49m');
+	}
+
+	return lines;
+}
+
+/**
+ * Draws a picture with cell backgrounds only, one pixel per cell. Coarser than `halfBlocks`,
+ * but terminals that draw `▀` from the font (Apple Terminal) leave a seam where the glyph
+ * stops short of the cell, which shows up as stripes; a background always fills the cell.
+ */
+export function solidBlocks(image: Thumbnail, {columns, rows}: Cells): string[] {
+	const src = decode(image);
+	const sx = src.w / columns;
+	const sy = src.h / rows;
+	const lines: string[] = [];
+	for (let row = 0; row < rows; row++) {
+		let line = '';
+		let last = '';
+		for (let col = 0; col < columns; col++) {
+			const sgr = `\u001B[48;2;${sample(src, col * sx, row * sy, (col + 1) * sx, (row + 1) * sy).join(';')}m`;
+			line += (sgr === last ? '' : sgr) + ' ';
+			last = sgr;
+		}
+
+		lines.push(line + '\u001B[49m');
 	}
 
 	return lines;

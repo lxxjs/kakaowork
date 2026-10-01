@@ -1,7 +1,8 @@
 import {Box, Text} from 'ink';
 import {useMemo, type ReactNode} from 'react';
 import type {Message, Thumbnail} from '../bridge/types.js';
-import {fitCells, halfBlocks} from '../lib/image.js';
+import {fitCells, halfBlocks, solidBlocks} from '../lib/image.js';
+import {graphics, kittyPicture} from '../lib/kitty.js';
 import {width} from '../lib/text.js';
 import {formatDay} from '../lib/time.js';
 import type {Item} from '../lib/transcript.js';
@@ -29,10 +30,23 @@ function Body({message}: {message: Message}) {
 	}
 }
 
-/** A photo or emoticon drawn in half-blocks, with the time trailing its last line. */
+/**
+ * A photo or emoticon, with the time trailing its last line: a real image where the terminal
+ * speaks kitty graphics (Ghostty, kitty), half-blocks everywhere else.
+ */
 function Picture({message, image, available, meta}: {message: Message; image: Thumbnail; available: number; meta: ReactNode}) {
-	const cells = fitCells(image, message.kind, available);
-	const lines = useMemo(() => halfBlocks(image, cells), [image, cells.columns, cells.rows]);
+	const sharp = graphics.kitty && Boolean(image.png);
+	// Solid cells hold one pixel each, so they get the bigger size to keep some detail.
+	const cells = fitCells(image, message.kind, available, sharp || graphics.solid);
+	const lines = useMemo(
+		() =>
+			sharp
+				? kittyPicture(image as Thumbnail & {png: string}, cells.columns, cells.rows)
+				: graphics.solid
+					? solidBlocks(image, cells)
+					: halfBlocks(image, cells),
+		[image, sharp, cells.columns, cells.rows],
+	);
 	return (
 		<>
 			{lines.map((line, i) => (
@@ -81,7 +95,7 @@ function MessageView({item, columns}: {item: Extract<Item, {type: 'message'}>; c
 	);
 
 	const available = Math.max(1, columns - 2 - 12); // bullet gutter, and room for the time
-	const picture = m.image ? <Picture message={m} image={m.image} available={available} meta={meta} /> : null;
+	const picture = graphics.enabled && m.image ? <Picture message={m} image={m.image} available={available} meta={meta} /> : null;
 
 	if (m.mine) {
 		// Your own messages sit on a shaded band, like prompts in Claude Code's transcript.
@@ -166,6 +180,7 @@ const HELP: Array<[string, string]> = [
 	['/close', '현재 채팅방 닫기'],
 	['/hide · /show', '카카오톡 창 숨김 모드 켜기 · 끄기'],
 	['/notify [on|off]', '다른 방 새 메시지 알림'],
+	['/images [on|off]', '사진·이모티콘 그림으로 보기 (기본: 끔)'],
 	['/status', '연결 상태'],
 	['/clear', '화면 지우기'],
 	['/exit', '종료 (Ctrl+C 두 번)'],

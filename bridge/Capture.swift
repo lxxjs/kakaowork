@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import ImageIO
 import ScreenCaptureKit
 
 @_silgen_name("_AXUIElementGetWindow")
@@ -11,8 +12,14 @@ struct Thumbnail {
     let height: Int
     /// Packed 8-bit RGB, row-major, `width * height * 3` bytes.
     let rgb: Data
+    /// The picture near full resolution, for terminals that draw real images.
+    var png: Data?
 
-    var json: [String: Any] { ["w": width, "h": height, "rgb": rgb.base64EncodedString()] }
+    var json: [String: Any] {
+        var d: [String: Any] = ["w": width, "h": height, "rgb": rgb.base64EncodedString()]
+        if let png { d["png"] = png.base64EncodedString() }
+        return d
+    }
 }
 
 /// Reads pixels straight out of KakaoTalk's chat window with ScreenCaptureKit.
@@ -23,6 +30,35 @@ final class Capture {
     /// Longest side of a thumbnail in pixels. The terminal shows far fewer cells than this,
     /// but a little headroom lets the UI resample when the window is resized.
     static let maxSide = 96
+
+    static let sharpMaxSide = 800
+
+    /// Off until the CLI turns pictures on (`config`), so by default nothing is captured and
+    /// Screen Recording permission is never asked for.
+    var enabled = false
+    /// Also send a sharp PNG — set when the terminal speaks kitty graphics.
+    var sharp = false
+    static let debug = ProcessInfo.processInfo.environment["KAKAOWORK_DEBUG"] != nil
+
+    /// Two frames match when a 16×16 reduction differs by under ~1% per channel on average.
+    static func same(_ a: CGImage, _ b: CGImage) -> Bool {
+        guard let x = fingerprint(a), let y = fingerprint(b) else { return false }
+        let total = zip(x, y).reduce(0) { $0 + abs(Int($1.0) - Int($1.1)) }
+        return Double(total) / Double(x.count) < 2.5
+    }
+
+    private static func fingerprint(_ image: CGImage) -> [UInt8]? {
+        var pixels = [UInt8](repeating: 0, count: 16 * 16 * 4)
+        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let ctx = CGContext(data: buffer.baseAddress, width: 16, height: 16, bitsPerComponent: 8, bytesPerRow: 64,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            ctx.interpolationQuality = .medium
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: 16, height: 16))
+            return true
+        }
+        return drawn ? pixels : nil
+    }
 
     private var windows: [CGWindowID: AnyObject] = [:]  // SCWindow, boxed for macOS 12 builds
     private var asked = false
@@ -37,13 +73,51 @@ final class Capture {
 
     /// Captures `rect` (screen points) from `window`. Returns nil unless the whole rect is
     /// inside `viewport` — a half-scrolled photo would come out cropped.
-    func thumbnail(window: AXUIElement, rect: CGRect, viewport: CGRect) -> Thumbnail? {
+    ///
+    /// - Parameter attempts: how many frames to wait for the picture to settle. KakaoTalk loads a
+    ///   picture once it scrolls into view and fades it in, so a frame grabbed too early blends it
+    ///   with whatever was drawn there before. Animated emoticons never settle; pass fewer.
+    func thumbnail(window: AXUIElement, rect: CGRect, viewport: CGRect, attempts: Int = 8) -> Thumbnail? {
         guard #available(macOS 14.0, *) else { return nil }
-        guard rect.width >= 8, rect.height >= 8, viewport.insetBy(dx: -1, dy: -1).contains(rect), allowed else { return nil }
+        guard enabled, rect.width >= 8, rect.height >= 8, viewport.insetBy(dx: -1, dy: -1).contains(rect), allowed else { return nil }
         var id: CGWindowID = 0
         guard _AXUIElementGetWindow(window, &id) == .success, id != 0 else { return nil }
-        guard let image = grab(windowID: id, windowFrame: window.frame, rect: rect) else { return nil }
-        return Capture.downscale(image)
+        let frame = window.frame
+        var image: CGImage?
+        var tries = 0
+        for _ in 0..<max(1, attempts) {
+            tries += 1
+            guard let current = grab(windowID: id, windowFrame: frame, rect: rect) else { break }
+            if let previous = image, Capture.same(previous, current) { image = current; break }
+            image = current
+            if tries < attempts { usleep(90_000) }
+        }
+        if Capture.debug { FileHandle.standardError.write("capture: \(tries) frame(s)\n".data(using: .utf8)!) }
+        guard let image, var thumbnail = Capture.downscale(image) else { return nil }
+        if sharp { thumbnail.png = Capture.png(image, maxSide: Capture.sharpMaxSide) }
+        return thumbnail
+    }
+
+    static func png(_ image: CGImage, maxSide: Int) -> Data? {
+        let data = NSMutableData()
+        guard let scaled = resized(image, maxSide: maxSide),
+              let destination = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, scaled, nil)
+        return CGImageDestinationFinalize(destination) ? data as Data : nil
+    }
+
+    private static func resized(_ image: CGImage, maxSide: Int) -> CGImage? {
+        let longest = max(image.width, image.height)
+        guard longest > maxSide else { return image }
+        let factor = Double(maxSide) / Double(longest)
+        let w = max(1, Int((Double(image.width) * factor).rounded()))
+        let h = max(1, Int((Double(image.height) * factor).rounded()))
+        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.interpolationQuality = .high
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return ctx.makeImage()
     }
 
     @available(macOS 14.0, *)

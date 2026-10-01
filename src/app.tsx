@@ -4,6 +4,8 @@ import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import type {Bridge, BridgeEvent, ChatRoom, Message} from './bridge/types.js';
 import * as ed from './lib/editor.js';
 import {filterRooms} from './lib/fuzzy.js';
+import {graphics} from './lib/kitty.js';
+import {saveSettings} from './lib/settings.js';
 import {formatClock, isoDay} from './lib/time.js';
 import {fillTimes, Grouper, isGroupRoom, item, type Item} from './lib/transcript.js';
 import {Shortcuts, StatusLine} from './ui/Footer.js';
@@ -35,6 +37,7 @@ const COMMANDS = [
 	{name: 'hide', args: '', desc: '카카오톡 창 숨김 모드 (필요할 때만 잠깐 뜸)'},
 	{name: 'show', args: '', desc: '카카오톡 창 보이기 (숨김 모드 끄기)'},
 	{name: 'notify', args: '[on|off]', desc: '다른 방 새 메시지 알림 켜기/끄기'},
+	{name: 'images', args: '[on|off]', desc: '사진·이모티콘을 그림으로 보기 켜기/끄기'},
 	{name: 'status', args: '', desc: '연결 상태 보기'},
 	{name: 'clear', args: '', desc: '화면 지우기'},
 	{name: 'help', args: '', desc: '도움말'},
@@ -309,6 +312,7 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 				}),
 			);
 			setHidden(status.hidden);
+			await bridge.configure({capture: graphics.enabled, sharp: graphics.enabled && graphics.kitty});
 			await bridge.watch({chats: true});
 			if (hideOnStart) {
 				await bridge.setHidden(true);
@@ -503,6 +507,47 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 				break;
 			}
 
+			case 'images': {
+				echo();
+				const on = arg === 'on' ? true : arg === 'off' ? false : !graphics.enabled;
+				try {
+					await bridge.configure({capture: on, sharp: on && graphics.kitty});
+				} catch (error) {
+					fail('Images', on ? 'on' : 'off', error);
+					break;
+				}
+
+				graphics.enabled = on;
+				saveSettings({images: on ? 'on' : 'off'});
+				// Re-read the open room so pictures appear (or turn back into [사진]) right away.
+				const cur = currentRef.current;
+				if (cur) {
+					const id = begin(on ? '사진 불러오는 중' : '다시 불러오는 중');
+					try {
+						const result = await bridge.messages(cur.title, cur.limit, true);
+						if (!stale(id)) showRoom({...cur, rowCount: result.rowCount}, result.messages, true);
+					} catch (error) {
+						fail('Images', on ? 'on' : 'off', error);
+					} finally {
+						finish(id);
+					}
+				}
+
+				const how = graphics.kitty ? '실제 이미지 (Kitty 그래픽)' : graphics.solid ? '색 칸 모자이크' : '블록 문자 썸네일';
+				push(
+					item({
+						type: 'tool',
+						title: 'Images',
+						arg: on ? 'on' : 'off',
+						status: 'ok',
+						lines: on
+							? [`사진·이모티콘을 그림으로 보여줍니다 · ${how}`, '화면 기록 권한이 없으면 처음 한 번 물어봐요']
+							: ['사진·이모티콘을 [사진]·[이모티콘]으로 보여줍니다'],
+					}),
+				);
+				break;
+			}
+
 			case 'notify': {
 				echo();
 				const on = arg === 'on' ? true : arg === 'off' ? false : !notifyRef.current;
@@ -528,6 +573,7 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 								`화면 기록 권한 · ${s.screenCapture ? '허용됨 (사진 미리보기)' : '꺼짐 · 사진은 [사진]으로만 표시'}`,
 								`내 프로필 · ${s.me ?? '알 수 없음'}`,
 								`안 읽은 메시지 · ${s.totalUnread ?? '?'}`,
+								`사진 보기 · ${graphics.enabled ? (graphics.kitty ? '켬 (Kitty 그래픽)' : graphics.solid ? '켬 (색 칸)' : '켬 (블록 문자)') : '끔'}`,
 								`열린 채팅창 · ${s.openChats?.length ? s.openChats.join(', ') : '없음'}`,
 								`현재 채팅방 · ${cur?.title ?? '없음'}`,
 							],

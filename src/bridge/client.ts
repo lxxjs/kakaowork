@@ -73,6 +73,10 @@ export class ProcessBridge implements Bridge {
 		await this.call('close', {title});
 	}
 
+	async configure(options: {capture?: boolean; sharp?: boolean}) {
+		await this.call('config', options);
+	}
+
 	async setHidden(hidden: boolean) {
 		await this.call(hidden ? 'hide' : 'show');
 	}
