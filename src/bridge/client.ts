@@ -73,7 +73,7 @@ export class ProcessBridge implements Bridge {
 		await this.call('close', {title});
 	}
 
-	async configure(options: {capture?: boolean; sharp?: boolean}) {
+	async configure(options: {capture?: boolean; sharp?: boolean; ask?: boolean}) {
 		await this.call('config', options);
 	}
 
@@ -86,8 +86,9 @@ export class ProcessBridge implements Bridge {
 		return () => this.listeners.delete(listener);
 	}
 
+	/** Closes the bridge's stdin; it puts KakaoTalk's windows back in place and exits. */
 	dispose() {
-		if (!this.exited) this.child.kill();
+		if (!this.exited) this.child.stdin.end();
 	}
 
 	private call<T>(cmd: string, args: Record<string, unknown> = {}, timeoutMs = 20_000): Promise<T> {

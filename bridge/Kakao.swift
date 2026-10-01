@@ -26,7 +26,12 @@ final class Kakao {
     private let homeBundleID = ProcessInfo.processInfo.environment["__CFBundleIdentifier"]
 
     var app: NSRunningApplication? {
-        NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID).first
+        for attempt in 0..<3 {
+            if let app = NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID).first { return app }
+            // A freshly started process can briefly see an empty list of running apps.
+            if attempt < 2 { usleep(100_000) }
+        }
+        return nil
     }
 
     func axApp() throws -> AXUIElement {
@@ -92,10 +97,7 @@ final class Kakao {
     /// Unhides KakaoTalk and makes it frontmost, for the few things that need real key focus.
     private func bringForward() throws {
         let app = try axApp()
-        if isHidden() {
-            app.set(kAXHiddenAttribute, kCFBooleanFalse)
-            usleep(150_000)
-        }
+        if isHidden() { app.set(kAXHiddenAttribute, kCFBooleanFalse) }
         app.set(kAXFrontmostAttribute, kCFBooleanTrue)
     }
 
@@ -107,18 +109,105 @@ final class Kakao {
         if target == nil || target?.processIdentifier == kakao.processIdentifier {
             target = keepHidden ? homeBundleID.flatMap { NSRunningApplication.runningApplications(withBundleIdentifier: $0).first } : nil
         }
-        if let target, target.processIdentifier != kakao.processIdentifier, isFrontmost() {
+        // Hiding first takes KakaoTalk off screen at once; macOS then hands focus to the app
+        // that was active before it, and we make sure it is the one the user was in.
+        if keepHidden { (try? axApp())?.set(kAXHiddenAttribute, kCFBooleanTrue) }
+        if let target, target.processIdentifier != kakao.processIdentifier,
+           frontmostApp()?.processIdentifier != target.processIdentifier {
             let front = AXUIElementCreateApplication(target.processIdentifier)
             if front.set(kAXFrontmostAttribute, kCFBooleanTrue) != .success { target.activate() }
-            usleep(100_000)
+            for _ in 0..<20 where isFrontmost() { usleep(10_000) }
+            if keepHidden { (try? axApp())?.set(kAXHiddenAttribute, kCFBooleanTrue) }
         }
-        if keepHidden { (try? axApp())?.set(kAXHiddenAttribute, kCFBooleanTrue) }
     }
 
     /// Called from polling: once the user has left KakaoTalk, tuck it away again.
     func enforceHidden() {
-        guard keepHidden, app != nil, !isHidden(), !isFrontmost() else { return }
+        guard keepHidden, app != nil, !isHidden() else { return }
+        // Polling never overlaps open(), so KakaoTalk in front now means the user brought it up.
+        if isFrontmost() { unparkAll(); return }
         (try? axApp())?.set(kAXHiddenAttribute, kCFBooleanTrue)
+    }
+
+    private func trace(_ what: String) {
+        guard ProcessInfo.processInfo.environment["KAKAOWORK_DEBUG"] != nil else { return }
+        FileHandle.standardError.write(String(format: "%.3f %@\n", Date().timeIntervalSince1970, what).data(using: .utf8)!)
+    }
+
+    // MARK: parking
+    //
+    // Opening a room needs KakaoTalk in front for a moment, which would flash its windows on
+    // screen. So while it is kept hidden its windows wait in the bottom-right corner of the
+    // main display — as far off screen as macOS allows (it keeps a sliver of title bar on
+    // screen) — and go back to where they were whenever KakaoTalk is shown or closed, so using
+    // KakaoTalk directly still finds them in place.
+    //
+    // macOS only accepts that spot for a visible window; a hidden window parked anywhere it
+    // considers invalid gets pulled fully on screen when it reappears. So the spot is learned:
+    // the first time KakaoTalk has to come forward, windows are pushed into the corner and
+    // wherever macOS lets them settle is remembered, and from then on they wait there.
+
+    private var homes: [String: CGPoint] = [:]
+    private var learnedSpot: CGPoint?
+
+    private var cornerRequest: CGPoint {
+        let f = NSScreen.screens.first?.frame ?? .zero
+        return CGPoint(x: f.maxX - 1, y: f.maxY - 1)
+    }
+
+    private func isParked(_ origin: CGPoint) -> Bool {
+        guard let spot = learnedSpot else { return false }
+        return abs(origin.x - spot.x) < 2 && abs(origin.y - spot.y) < 2
+    }
+
+    private func homeKey(_ window: AXUIElement) -> String {
+        window.identifier == "Main Window" ? "main" : "chat:" + window.title
+    }
+
+    private func home(for key: String) -> CGPoint {
+        if let p = homes[key] { return p }
+        let main = homes["main"] ?? CGPoint(x: 200, y: 120)
+        return key == "main" ? main : CGPoint(x: main.x + 30, y: main.y + 30)
+    }
+
+    private func setOrigin(_ window: AXUIElement, _ point: CGPoint) {
+        var p = point
+        window.set(kAXPositionAttribute, AXValueCreate(.cgPoint, &p)!)
+    }
+
+    /// Sends a window to the corner. While KakaoTalk is hidden this only happens once the
+    /// spot is known to be acceptable; a visible window teaches us the spot.
+    func park(_ window: AXUIElement, visible: Bool) {
+        let origin = window.frame.origin
+        guard !isParked(origin) else { return }
+        if homes[homeKey(window)] == nil { homes[homeKey(window)] = origin }
+        if visible {
+            setOrigin(window, cornerRequest)
+            // macOS settles the position a moment later; remember where it ends up.
+            var settled = window.frame.origin
+            for _ in 0..<10 {
+                usleep(5_000)
+                let now = window.frame.origin
+                if now == settled && now != cornerRequest { break }
+                settled = now
+            }
+            learnedSpot = settled
+        } else if let spot = learnedSpot {
+            setOrigin(window, spot)
+        }
+    }
+
+    /// Puts a window we moved back where it was.
+    private func unpark(_ window: AXUIElement) {
+        let key = homeKey(window)
+        guard homes[key] != nil || isParked(window.frame.origin) else { return }
+        setOrigin(window, home(for: key))
+        homes[key] = nil
+    }
+
+    /// Puts every window we moved back (on show, on exit, when the user opens KakaoTalk).
+    func unparkAll() {
+        for window in (try? windows()) ?? [] { unpark(window) }
     }
 
     /// The chat list table in the main window, switching to the chats tab if needed.
@@ -235,6 +324,12 @@ final class Kakao {
             throw BridgeError("not_found", "'\(name)' 채팅방을 찾을 수 없습니다")
         }
 
+        // What works without focus happens while KakaoTalk is still hidden, so the moment it
+        // has to be in front is as short as possible.
+        scrollIntoView(scroll: scroll, table: table, index: index)
+        let main = try mainWindow()
+        if keepHidden { for window in try windows() { park(window, visible: false) } }
+
         let previous = frontmostApp()
         let wasHidden = isHidden()
         defer {
@@ -245,14 +340,13 @@ final class Kakao {
         // Opening a room needs a real Return keypress in the chat list, so KakaoTalk has to
         // be frontmost with the list focused. Focus is verified before the key is sent so a
         // stray Return can never land in some chat's input field.
-        let main = try mainWindow()
         try bringForward()
+        // Visible now: anything not sitting in the corner (first time, or macOS moved it) goes there.
+        if keepHidden { for window in try windows() { park(window, visible: true) } }
         main.perform(kAXRaiseAction)
         main.set(kAXMainAttribute, kCFBooleanTrue)
-        table.set(kAXFocusedAttribute, kCFBooleanTrue)
-        usleep(150_000)
 
-        scrollIntoView(scroll: scroll, table: table, index: index)
+        // KakaoTalk rebuilds the list when it comes forward, so find the row again now.
         let rows = table.children
         guard index < rows.count, Parse.chatRow(rows[index], index: index)?.name == name else {
             throw BridgeError("not_found", "채팅 목록이 바뀌었습니다. 다시 시도해 주세요")
@@ -260,25 +354,51 @@ final class Kakao {
         let row = rows[index]
         row.set(kAXSelectedAttribute, kCFBooleanTrue)
         table.set(kAXSelectedRowsAttribute, [row] as CFArray)
-        usleep(80_000)
 
-        let focusedWindow = app.attribute(kAXFocusedWindowAttribute).map { $0 as! AXUIElement }
-        let focused = app.attribute(kAXFocusedUIElementAttribute).map { $0 as! AXUIElement }
-        let selected = (table.attribute(kAXSelectedRowsAttribute) as? [AXUIElement]) ?? []
-        guard focusedWindow?.same(main) == true,
-              focused.map({ $0.same(table) || $0.role == "AXTable" }) == true,
-              selected.contains(where: { $0.same(row) })
-        else {
-            throw BridgeError("focus_failed", "카카오톡 채팅 목록에 포커스를 줄 수 없습니다")
+        var ready = false
+        for _ in 0..<50 {
+            table.set(kAXFocusedAttribute, kCFBooleanTrue)
+            let focusedWindow = app.attribute(kAXFocusedWindowAttribute).map { $0 as! AXUIElement }
+            let focused = app.attribute(kAXFocusedUIElementAttribute).map { $0 as! AXUIElement }
+            let selected = (table.attribute(kAXSelectedRowsAttribute) as? [AXUIElement]) ?? []
+            if focusedWindow?.same(main) == true, focused.map({ $0.same(table) || $0.role == "AXTable" }) == true,
+               selected.contains(where: { $0.same(row) }) {
+                ready = true
+                break
+            }
+            usleep(10_000)
         }
+        guard ready else { throw BridgeError("focus_failed", "카카오톡 채팅 목록에 포커스를 줄 수 없습니다") }
 
+        let pid = kakao.processIdentifier
         let source = CGEventSource(stateID: .privateState)
-        CGEvent(keyboardEventSource: source, virtualKey: Self.returnKey, keyDown: true)?.postToPid(kakao.processIdentifier)
-        CGEvent(keyboardEventSource: source, virtualKey: Self.returnKey, keyDown: false)?.postToPid(kakao.processIdentifier)
+        CGEvent(keyboardEventSource: source, virtualKey: Self.returnKey, keyDown: true)?.postToPid(pid)
+        CGEvent(keyboardEventSource: source, virtualKey: Self.returnKey, keyDown: false)?.postToPid(pid)
+        trace("return sent")
 
-        for _ in 0..<40 {
-            usleep(100_000)
-            if try chatWindow(title: name) != nil { return ["title": name, "alreadyOpen": false] }
+        // The room's window comes up wherever KakaoTalk last saved it — usually mid-screen —
+        // and macOS won't let a new window appear off screen. KakaoTalk creates the window a
+        // moment before it puts it on screen (unhiding itself to do so), so hide it as soon as
+        // the window exists and keep it hidden while KakaoTalk tries to show it; the room
+        // finishes loading in the background.
+        for _ in 0..<1300 {
+            usleep(3_000)
+            if let window = try chatWindow(title: name) {
+                trace("chat window in AX tree, hidden=\(isHidden())")
+                if keepHidden {
+                    app.set(kAXHiddenAttribute, kCFBooleanTrue)
+                    park(window, visible: false)
+                    let until = Date().addingTimeInterval(0.6)
+                    while Date() < until {
+                        if !isHidden() {
+                            app.set(kAXHiddenAttribute, kCFBooleanTrue)
+                            trace("KakaoTalk unhid itself; hidden again")
+                        }
+                        usleep(3_000)
+                    }
+                }
+                return ["title": name, "alreadyOpen": false]
+            }
         }
         throw BridgeError("open_timeout", "'\(name)' 채팅창이 열리지 않았습니다")
     }
@@ -300,6 +420,8 @@ final class Kakao {
         guard let button = window.children.first(where: { $0.attribute(kAXSubroleAttribute) as? String == kAXCloseButtonSubrole }) else {
             throw BridgeError("close_failed", "닫기 버튼을 찾을 수 없습니다")
         }
+        // KakaoTalk reopens a room where its window was last closed, so don't leave it parked.
+        unpark(window)
         button.perform(kAXPressAction)
     }
 
@@ -461,6 +583,7 @@ final class Kakao {
     func setHidden(_ hidden: Bool) throws {
         let app = try axApp()
         keepHidden = hidden
+        if !hidden { unparkAll() }
         if hidden, isFrontmost() {
             handBack(to: nil)  // hands focus to the terminal, then hides
         } else {

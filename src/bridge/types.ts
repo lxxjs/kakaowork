@@ -67,7 +67,7 @@ export interface Bridge {
 	close(title: string): Promise<void>;
 	setHidden(hidden: boolean): Promise<void>;
 	/** Turns picture capture on or off (off by default), and asks for sharp PNGs. */
-	configure(options: {capture?: boolean; sharp?: boolean}): Promise<void>;
+	configure(options: {capture?: boolean; sharp?: boolean; ask?: boolean}): Promise<void>;
 	on(listener: (event: BridgeEvent) => void): () => void;
 	dispose(): void;
 }

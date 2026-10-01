@@ -49,6 +49,11 @@ final class Server {
         }
     }
 
+    /// Leaves KakaoTalk's windows where the user had them before quitting.
+    func shutdown() {
+        queue.sync { kakao.unparkAll() }
+    }
+
     func runOnce(_ request: [String: Any]) -> Int32 {
         var status: Int32 = 0
         queue.sync {
@@ -108,6 +113,7 @@ final class Server {
         case "config":
             if let enabled = req["capture"] as? Bool { kakao.capture.enabled = enabled }
             if let sharp = req["sharp"] as? Bool { kakao.capture.sharp = sharp }
+            if let ask = req["ask"] as? Bool { kakao.capture.mayAsk = ask }
             return ["capture": kakao.capture.enabled, "sharp": kakao.capture.sharp]
 
         case "hide", "show":
@@ -201,7 +207,16 @@ Thread {
     while let line = readLine(strippingNewline: true) {
         if !line.isEmpty { server.receive(line) }
     }
+    server.shutdown()
     exit(0)  // parent closed stdin
 }.start()
+
+signal(SIGTERM, SIG_IGN)
+let terminate = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+terminate.setEventHandler {
+    server.shutdown()
+    exit(0)
+}
+terminate.resume()
 
 RunLoop.main.run()

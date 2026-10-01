@@ -67,9 +67,13 @@ final class Capture {
     /// there is actually a picture to show.
     var allowed: Bool {
         if CGPreflightScreenCaptureAccess() { return true }
-        if !asked { asked = true; _ = CGRequestScreenCaptureAccess() }
+        if mayAsk && !asked { asked = true; _ = CGRequestScreenCaptureAccess() }
         return false
     }
+
+    /// Set only when the user turns pictures on, so the permission prompt never shows up
+    /// unasked on a normal launch.
+    var mayAsk = false
 
     /// Captures `rect` (screen points) from `window`. Returns nil unless the whole rect is
     /// inside `viewport` — a half-scrolled photo would come out cropped.

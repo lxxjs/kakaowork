@@ -511,7 +511,8 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 				echo();
 				const on = arg === 'on' ? true : arg === 'off' ? false : !graphics.enabled;
 				try {
-					await bridge.configure({capture: on, sharp: on && graphics.kitty});
+					// Turning pictures on is the one time asking for Screen Recording is expected.
+					await bridge.configure({capture: on, sharp: on && graphics.kitty, ask: on});
 				} catch (error) {
 					fail('Images', on ? 'on' : 'off', error);
 					break;
