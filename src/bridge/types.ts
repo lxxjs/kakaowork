@@ -38,6 +38,8 @@ export interface Message {
 	image?: Thumbnail;
 }
 
+export type UnreadRow = Pick<Message, 'row' | 'kind' | 'mine' | 'text' | 'unread'>;
+
 export interface Status {
 	trusted: boolean;
 	running: boolean;
@@ -62,6 +64,8 @@ export interface Bridge {
 	chats(limit?: number): Promise<{rooms: ChatRoom[]; totalUnread: number | null}>;
 	open(name: string, index?: number): Promise<{title: string; alreadyOpen: boolean}>;
 	messages(title: string, limit: number, watch: boolean): Promise<{messages: Message[]; rowCount: number}>;
+	/** Re-reads unread counts from row `from` to the newest one. */
+	unread(title: string, from: number): Promise<{rows: UnreadRow[]}>;
 	send(title: string, text: string): Promise<void>;
 	watch(options: {chats?: boolean; stopRoom?: boolean}): Promise<void>;
 	close(title: string): Promise<void>;

@@ -2,7 +2,7 @@ import {spawn, type ChildProcessWithoutNullStreams} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {createInterface} from 'node:readline';
 import {fileURLToPath} from 'node:url';
-import {BridgeError, type Bridge, type BridgeEvent, type ChatRoom, type Message, type Status} from './types.js';
+import {BridgeError, type Bridge, type BridgeEvent, type ChatRoom, type Message, type Status, type UnreadRow} from './types.js';
 
 type Pending = {
 	resolve: (value: any) => void;
@@ -59,6 +59,10 @@ export class ProcessBridge implements Bridge {
 
 	messages(title: string, limit: number, watch: boolean) {
 		return this.call<{messages: Message[]; rowCount: number}>('messages', {title, limit, watch}, 60_000);
+	}
+
+	unread(title: string, from: number) {
+		return this.call<{rows: UnreadRow[]}>('unread', {title, from});
 	}
 
 	async send(title: string, text: string) {

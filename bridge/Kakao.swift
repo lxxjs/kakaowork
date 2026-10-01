@@ -555,6 +555,23 @@ final class Kakao {
         return (list, rows.count)
     }
 
+    /// Re-reads rows `from` through the newest (at most `limit`) for their unread counts.
+    /// Pictures are not captured, so this is cheap enough to repeat every few seconds.
+    func unread(title: String, from: Int, limit: Int) throws -> [Message] {
+        let window = try requireWindow(title)
+        guard let (scroll, table) = messageTable(in: window) else {
+            throw BridgeError("no_window", "메시지 목록을 찾을 수 없습니다")
+        }
+        let count = table.children.count
+        let start = min(count, max(0, from, count - limit))
+        var parsed: [Message] = []
+        visitRows(scroll: scroll, table: table, indices: Array(start..<count)) { index, row in
+            if let m = Parse.messageRow(row, index: index) { parsed.append(m) }
+            return false
+        }
+        return parsed.sorted { $0.row < $1.row }
+    }
+
     /// Parses a row and, if it shows a photo or emoticon, grabs the picture while it is on screen.
     func parseWithImage(_ row: AXUIElement, index: Int, window: AXUIElement, viewport: CGRect) -> Message? {
         guard var m = Parse.messageRow(row, index: index) else { return nil }

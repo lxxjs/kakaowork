@@ -91,6 +91,13 @@ final class Server {
             }
             return ["messages": messages.map(\.json), "rowCount": rowCount]
 
+        case "unread":
+            guard let title = req["title"] as? String else { throw BridgeError("bad_request", "title 이 필요합니다") }
+            let rows = try kakao.unread(title: title, from: req["from"] as? Int ?? 0, limit: req["limit"] as? Int ?? 100)
+            return ["rows": rows.map { m -> [String: Any] in
+                ["row": m.row, "kind": m.kind, "mine": m.mine, "text": m.text, "unread": m.unread ?? 0]
+            }]
+
         case "send":
             guard let title = req["title"] as? String, let text = req["text"] as? String, !text.isEmpty else {
                 throw BridgeError("bad_request", "title, text 가 필요합니다")

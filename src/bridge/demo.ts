@@ -124,14 +124,24 @@ export class DemoBridge implements Bridge {
 		return {messages: log.slice(-limit), rowCount: log.length};
 	}
 
+	async unread(title: string, from: number) {
+		const room = this.find(title);
+		await delay(50);
+		const rows = room.log.map(({kind, mine, text, unread}, row) => ({row, kind, mine, text, unread}));
+		return {rows: rows.slice(Math.max(0, from))};
+	}
+
 	async send(title: string, text: string) {
 		const room = this.find(title);
 		await delay(120);
-		this.append(room, msg('text', text, true, undefined, formatClock(new Date())));
+		const unread = room.kind === 'me' ? undefined : room.kind === 'direct' ? 1 : Math.max(1, (room.members ?? 2) - 1);
+		this.append(room, msg('text', text, true, undefined, formatClock(new Date()), {unread}));
 		if (room.kind === 'me') return;
 		const others = [...new Set(room.log.filter(m => !m.mine && m.sender).map(m => m.sender!))];
 		const who = room.kind === 'direct' || others.length === 0 ? room.name : others[Math.floor(Math.random() * others.length)];
 		const timer = setTimeout(() => {
+			// Whoever replies has read everything before, so each count drops by one.
+			for (const m of room.log) if (m.unread) m.unread -= 1;
 			this.append(room, msg('text', replies[Math.floor(Math.random() * replies.length)], false, who, formatClock(new Date())));
 		}, 1200 + Math.random() * 1500);
 		this.timers.push(timer);

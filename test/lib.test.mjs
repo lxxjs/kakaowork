@@ -4,7 +4,7 @@ import * as ed from '../dist/lib/editor.js';
 import {chosung, filterRooms, score} from '../dist/lib/fuzzy.js';
 import {fitCells, halfBlocks} from '../dist/lib/image.js';
 import {formatDay} from '../dist/lib/time.js';
-import {fillTimes, Grouper} from '../dist/lib/transcript.js';
+import {applyUnread, fillTimes, firstUnreadRow, Grouper, settleTimes} from '../dist/lib/transcript.js';
 import {width, wrapRows} from '../dist/lib/text.js';
 import {layout} from '../dist/ui/PromptInput.js';
 
@@ -68,7 +68,7 @@ test('fillTimes gives a run the time of its labelled last bubble', () => {
 	assert.deepEqual(out.map(x => x.time), ['오후 3:25', '오후 3:25', '오후 3:27', '오후 3:27', undefined, undefined]);
 });
 
-test('Grouper folds a sender\'s consecutive bubbles into one block', () => {
+test('Grouper folds a sender\'s consecutive bubbles within a minute into one block', () => {
 	const g = new Grouper(true);
 	const items = [
 		m('a', {sender: '민지', time: '오후 3:25'}),
@@ -78,8 +78,54 @@ test('Grouper folds a sender\'s consecutive bubbles into one block', () => {
 		m('e', {mine: true, time: '오후 3:26'}),
 		m('f', {mine: true, time: '오후 3:26'}),
 	].map(x => g.next(x));
-	assert.deepEqual(items.map(i => i.first), [true, false, false, true, true, false]);
-	assert.deepEqual(items.map(i => i.showTime), [true, false, true, true, true, false]);
+	assert.deepEqual(items.map(i => i.first), [true, false, true, true, true, false]);
+});
+
+test('settleTimes labels only the last bubble of a sender\'s minute, like KakaoTalk', () => {
+	const g = new Grouper(true);
+	const items = settleTimes(
+		[
+			m('a', {sender: '민지', time: '오후 3:25'}),
+			m('b', {sender: '민지', time: '오후 3:25'}),
+			m('c', {sender: '민지', time: '오후 3:26'}),
+			m('d', {sender: '지수', time: '오후 3:26'}),
+			m('e', {mine: true, time: '오후 3:26'}),
+			m('', {kind: 'divider'}),
+			m('f', {mine: true, time: '오후 3:26'}),
+		].map(x => g.next(x)),
+	);
+	assert.deepEqual(items.map(i => i.showTime), [false, true, true, true, true, false, true]);
+
+	// A bubble arriving in the same minute takes the label from the one before it.
+	const more = settleTimes([...items, g.next(m('g', {mine: true, time: '오후 3:26'}))]);
+	assert.deepEqual(more.map(i => i.showTime), [false, true, true, true, true, false, false, true]);
+	assert.equal(more[0], items[0], 'unchanged items are kept as they were');
+});
+
+test('applyUnread refreshes counts, lining rows up by content when they have moved', () => {
+	const g = new Grouper(false);
+	const items = [
+		m('a', {row: 3, mine: true, unread: 2}),
+		m('b', {row: 4, mine: true, unread: 2}),
+		m('c', {row: -1, mine: true}),
+	].map(x => g.next(x));
+	assert.equal(firstUnreadRow(items), 3);
+
+	const fresh = applyUnread(items, [
+		{row: 3, kind: 'text', mine: true, text: 'a', unread: 1},
+		{row: 4, kind: 'text', mine: true, text: 'b', unread: 0},
+	]);
+	assert.deepEqual(fresh.map(i => i.message.unread), [1, undefined, undefined]);
+	assert.equal(fresh[2], items[2]);
+
+	// Older history loaded above pushed everything down by ten rows.
+	const shifted = applyUnread(items, [
+		{row: 13, kind: 'text', mine: true, text: 'a', unread: 0},
+		{row: 14, kind: 'text', mine: true, text: 'b', unread: 1},
+	]);
+	assert.deepEqual(shifted.map(i => [i.message.row, i.message.unread]), [[13, undefined], [14, 1], [-1, undefined]]);
+
+	assert.equal(applyUnread(items, [{row: 4, kind: 'text', mine: true, text: 'zzz', unread: 0}]), items);
 });
 
 test('wrapRows breaks by display width, not code units', () => {

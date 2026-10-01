@@ -7,7 +7,7 @@ import {filterRooms} from './lib/fuzzy.js';
 import {graphics} from './lib/kitty.js';
 import {saveSettings} from './lib/settings.js';
 import {formatClock, isoDay} from './lib/time.js';
-import {fillTimes, Grouper, isGroupRoom, item, type Item} from './lib/transcript.js';
+import {applyUnread, fillTimes, firstUnreadRow, Grouper, isGroupRoom, item, settleTimes, type Item} from './lib/transcript.js';
 import {Shortcuts, StatusLine} from './ui/Footer.js';
 import {Picker} from './ui/Picker.js';
 import {PromptInput} from './ui/PromptInput.js';
@@ -96,7 +96,13 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 	const currentRef = useRef<Current | null>(null);
 	const notifyRef = useRef(true);
 	const grouper = useRef(new Grouper(false));
-	const pendingSends = useRef<string[]>([]);
+	// Sent messages shown as typed, by item id, until KakaoTalk's copy comes back.
+	const pendingSends = useRef<{text: string; id: number}[]>([]);
+	const itemsRef = useRef<Item[]>([]);
+	itemsRef.current = items;
+	// Terminal focus, from focus reports; assumed until the terminal says otherwise.
+	const focused = useRef(true);
+	const refreshing = useRef(false);
 	const history = useRef<string[]>([]);
 	const historyIndex = useRef<number | null>(null);
 	const draft = useRef('');
@@ -144,7 +150,7 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 		// Anything other than a message (a notice, a tool line) ends the current bubble block.
 		if (next.at(-1)?.type !== 'message') grouper.current.reset();
 		if (scrollRef.current > 0) setUnseen(n => n + next.filter(i => i.type === 'message' || i.type === 'notice').length);
-		setItems(prev => [...prev, ...next]);
+		setItems(prev => settleTimes([...prev, ...next]));
 	};
 	const setRooms = (list: ChatRoom[]) => {
 		roomsRef.current = list;
@@ -180,13 +186,14 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 				const cur = currentRef.current;
 				if (!cur || event.title !== cur.title) return;
 				const out: Item[] = [];
-				for (const raw of event.messages) {
-					const m: Message = {...raw};
+				const sent = new Map<number, Message>();
+				for (const m of fillTimes(event.messages)) {
 					if (m.mine) {
-						const i = pendingSends.current.findIndex(t => sameText(t, m.text));
+						const i = pendingSends.current.findIndex(p => sameText(p.text, m.text));
 						if (i >= 0) {
-							// Already shown when it was typed.
-							pendingSends.current.splice(i, 1);
+							// Already shown when it was typed; KakaoTalk's copy brings its row and unread count.
+							const [{id}] = pendingSends.current.splice(i, 1);
+							sent.set(id, m);
 							continue;
 						}
 					}
@@ -196,6 +203,17 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 					if (m.kind === 'divider') m.date ??= isoDay(new Date());
 					if (!m.mine && !m.sender && cur.room.kind === 'direct') m.sender = cur.room.name;
 					out.push(grouper.current.next(m));
+				}
+
+				if (sent.size > 0) {
+					setItems(prev =>
+						settleTimes(
+							prev.map(it => {
+								const m = it.type === 'message' ? sent.get(it.id) : undefined;
+								return m && it.type === 'message' ? {...it, message: {...m, time: m.time ?? it.message.time}} : it;
+							}),
+						),
+					);
 				}
 
 				if (out.length > 0) push(...out);
@@ -347,7 +365,24 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 		});
 		const body = fillTimes(named).map(m => grouper.current.next(m));
 		setRooms(roomsRef.current.map(r => (r.name === next.room.name ? {...r, unread: 0} : r)));
-		replaceTranscript([header, ...body], keepPosition);
+		replaceTranscript(settleTimes([header, ...body]), keepPosition);
+	};
+
+	/** Re-reads the open room's unread counts, from the oldest message someone hasn't read. */
+	const refreshUnread = async () => {
+		const cur = currentRef.current;
+		if (!cur || !focused.current || refreshing.current) return;
+		const from = firstUnreadRow(itemsRef.current);
+		if (from === undefined) return;
+		refreshing.current = true;
+		try {
+			const {rows} = await bridge.unread(cur.title, from);
+			if (currentRef.current?.title === cur.title) setItems(prev => applyUnread(prev, rows));
+		} catch {
+			// The window may have just closed; the next tick or the 'closed' event sorts it out.
+		} finally {
+			refreshing.current = false;
+		}
 	};
 
 	const enterRoom = async (room: ChatRoom, limit = 40) => {
@@ -426,12 +461,13 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 			return;
 		}
 
-		pendingSends.current.push(text);
-		push(grouper.current.next({row: -1, kind: 'text', mine: true, text, time: formatClock(new Date())}));
+		const echo = grouper.current.next({row: -1, kind: 'text', mine: true, text, time: formatClock(new Date())});
+		pendingSends.current.push({text, id: echo.id});
+		push(echo);
 		try {
 			await bridge.send(cur.title, text);
 		} catch (error) {
-			const i = pendingSends.current.indexOf(text);
+			const i = pendingSends.current.findIndex(p => p.id === echo.id);
 			if (i >= 0) pendingSends.current.splice(i, 1);
 			fail('Send', undefined, error);
 		}
@@ -745,7 +781,21 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 		if (next) setPicker({...picker, query: next, selected: 0});
 	};
 
+	const refreshRef = useRef(refreshUnread);
+	refreshRef.current = refreshUnread;
+	useEffect(() => {
+		const timer = setInterval(() => void refreshRef.current(), 5000);
+		return () => clearInterval(timer);
+	}, []);
+
 	useInput((input, key) => {
+		// Focus reports (turned on in cli.tsx): unread counts are only re-read while the terminal is in front.
+		if (input === '[I' || input === '[O') {
+			focused.current = input === '[I';
+			void refreshUnread();
+			return;
+		}
+
 		const mouse = /^\[<(\d+);\d+;\d+[Mm]$/.exec(input);
 		if (mouse) {
 			// Wheel events scroll the conversation; clicks are ignored.

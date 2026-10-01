@@ -1,4 +1,4 @@
-import type {ChatRoom, Message} from '../bridge/types.js';
+import type {ChatRoom, Message, UnreadRow} from '../bridge/types.js';
 
 export type ToolStatus = 'ok' | 'error' | 'info';
 
@@ -55,8 +55,9 @@ export function fillTimes(messages: Message[]): Message[] {
 }
 
 /**
- * Folds consecutive bubbles from one sender into a single block, the way Claude Code
- * shows one response under one bullet. Times are shown when the minute changes.
+ * Folds a sender's consecutive bubbles within one minute into a single block, the way Claude Code
+ * shows one response under one bullet; a new minute starts a new block, as a new reply would.
+ * Which bubbles show their time is left to `settleTimes`.
  */
 export class Grouper {
 	private who?: string;
@@ -72,12 +73,82 @@ export class Grouper {
 
 	next(message: Message): Item {
 		const s = speaker(message);
-		const first = s === undefined || s !== this.who;
-		const showTime = Boolean(message.time) && (first || message.time !== this.time);
+		const minute = Boolean(message.time && this.time && message.time !== this.time);
+		const first = s === undefined || s !== this.who || minute;
 		this.who = s;
-		this.time = s === undefined ? undefined : message.time ?? this.time;
-		return item({type: 'message', message, first, showTime, group: this.group});
+		this.time = message.time ?? this.time;
+		return item({type: 'message', message, first, showTime: Boolean(message.time), group: this.group});
 	}
+}
+
+function sameMinute(a: Message, b: Message): boolean {
+	const s = speaker(a);
+	return s !== undefined && s === speaker(b) && Boolean(a.time) && a.time === b.time;
+}
+
+/**
+ * Shows a time only on the last bubble one sender posts within a minute, as KakaoTalk does.
+ * Items whose label changes are replaced; the rest are returned as they were.
+ */
+export function settleTimes(items: Item[]): Item[] {
+	let next: Message | undefined;
+	let changed = false;
+	const out = [...items];
+	for (let i = out.length - 1; i >= 0; i--) {
+		const it = out[i];
+		if (it.type !== 'message') continue;
+		const showTime = Boolean(it.message.time) && !(next && sameMinute(it.message, next));
+		if (showTime !== it.showTime) {
+			out[i] = {...it, showTime};
+			changed = true;
+		}
+
+		next = it.message;
+	}
+
+	return changed ? out : items;
+}
+
+function sameBubble(a: UnreadRow | undefined, b: Message): a is UnreadRow {
+	return a !== undefined && a.kind === b.kind && a.mine === b.mine && a.text === b.text;
+}
+
+/**
+ * Copies fresh unread counts onto messages already shown. Rows move when KakaoTalk loads
+ * older history above, so the newest message is lined up by content first; matched
+ * messages take the row they are on now.
+ */
+export function applyUnread(items: Item[], rows: UnreadRow[]): Item[] {
+	const byRow = new Map(rows.map(r => [r.row, r]));
+	const last = items.findLast(it => it.type === 'message' && it.message.row >= 0);
+	if (!last || last.type !== 'message') return items;
+	let shift = 0;
+	if (!sameBubble(byRow.get(last.message.row), last.message)) {
+		const match = rows.findLast(r => sameBubble(r, last.message));
+		if (!match) return items;
+		shift = match.row - last.message.row;
+	}
+
+	let changed = false;
+	const out = items.map(it => {
+		if (it.type !== 'message' || it.message.row < 0) return it;
+		const r = byRow.get(it.message.row + shift);
+		if (!sameBubble(r, it.message)) return it;
+		const unread = r.unread || undefined;
+		if (unread === (it.message.unread || undefined) && r.row === it.message.row) return it;
+		changed = true;
+		return {...it, message: {...it.message, row: r.row, unread}};
+	});
+	return changed ? out : items;
+}
+
+/** The first row whose unread count can still drop, or undefined when every message is read. */
+export function firstUnreadRow(items: Item[]): number | undefined {
+	for (const it of items) {
+		if (it.type === 'message' && it.message.row >= 0 && it.message.unread) return it.message.row;
+	}
+
+	return undefined;
 }
 
 export function isGroupRoom(room?: ChatRoom): boolean {

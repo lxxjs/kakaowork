@@ -107,11 +107,12 @@ const instance = render(
 	{exitOnCtrlC: false, alternateScreen: true},
 );
 
-// Mouse reporting (button events, SGR encoding) so the wheel scrolls the conversation.
-const mouseOn = '\u001B[?1000h\u001B[?1006h';
-const mouseOff = '\u001B[?1000l\u001B[?1006l';
-process.stdout.write(mouseOn);
-process.on('exit', () => process.stdout.write(mouseOff + (graphics.kitty ? deleteAll : '')));
+// Mouse reporting (button events, SGR encoding) so the wheel scrolls the conversation, and
+// focus reporting so unread counts are refreshed only while the terminal is in front.
+const reportingOn = '\u001B[?1000h\u001B[?1006h\u001B[?1004h';
+const reportingOff = '\u001B[?1000l\u001B[?1006l\u001B[?1004l';
+process.stdout.write(reportingOn);
+process.on('exit', () => process.stdout.write(reportingOff + (graphics.kitty ? deleteAll : '')));
 
 const shutdown = () => {
 	bridge.dispose();
