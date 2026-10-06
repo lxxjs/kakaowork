@@ -682,18 +682,6 @@ final class Kakao {
             }
             return false
         }
-        var enabled = try fill()
-        if !enabled {
-            // Give the composer focus and try once more before giving up.
-            input.set(kAXValueAttribute, "" as CFString)
-            input.set(kAXFocusedAttribute, kCFBooleanTrue)
-            usleep(100_000)
-            enabled = try fill()
-        }
-        guard enabled else {
-            input.set(kAXValueAttribute, "" as CFString)
-            throw BridgeError("send_failed", "전송 버튼이 활성화되지 않았습니다\(blockers(window))")
-        }
         // KakaoTalk reports failure for AXPress even when it sends, so check the input instead.
         // A read KakaoTalk is too busy to answer says nothing either way, so it doesn't count.
         func cleared() -> Bool {
@@ -704,13 +692,60 @@ final class Kakao {
             default: return false
             }
         }
-        send.perform(kAXPressAction)
-        for _ in 0..<40 {
-            usleep(50_000)
-            if cleared() { return }
+
+        // An empty input alone doesn't prove the message went: KakaoTalk also empties it for its
+        // own reasons (finishing the send before, say), taking our text with it. What proves it
+        // is a new bubble of ours in the conversation, so remember where the conversation ends.
+        let table = messageTable(in: window)?.table
+        func newest(_ rows: [AXUIElement]) -> Int? {
+            for i in stride(from: rows.count - 1, through: max(0, rows.count - 5), by: -1)
+            where Parse.messageRow(rows[i], index: i) != nil { return i }
+            return rows.isEmpty ? -1 : nil
         }
-        input.set(kAXValueAttribute, "" as CFString)
-        throw BridgeError("send_failed", "전송되지 않았습니다")
+        // Nil when the rows can't be read right now; then there is nothing to check against.
+        let before = table.flatMap { newest($0.children) }
+        func landed() -> Bool {
+            guard let table, let before else { return true }
+            let rows = table.children
+            guard before + 1 < rows.count else { return false }
+            return ((before + 1)..<rows.count).contains { Parse.messageRow(rows[$0], index: $0)?.mine == true }
+        }
+
+        /// Types and sends once; false when KakaoTalk took the text but no message came of it.
+        func attempt() throws -> Bool {
+            var enabled = try fill()
+            if !enabled {
+                // Give the composer focus and try once more before giving up.
+                input.set(kAXValueAttribute, "" as CFString)
+                input.set(kAXFocusedAttribute, kCFBooleanTrue)
+                usleep(100_000)
+                enabled = try fill()
+            }
+            guard enabled else {
+                input.set(kAXValueAttribute, "" as CFString)
+                throw BridgeError("send_failed", "전송 버튼이 활성화되지 않았습니다\(blockers(window))")
+            }
+            send.perform(kAXPressAction)
+            var empty = false
+            for _ in 0..<40 where !empty {
+                usleep(50_000)
+                empty = cleared()
+            }
+            guard empty else {
+                input.set(kAXValueAttribute, "" as CFString)
+                throw BridgeError("send_failed", "전송되지 않았습니다")
+            }
+            for _ in 0..<40 {
+                if landed() { return true }
+                usleep(50_000)
+            }
+            return false
+        }
+
+        if try attempt() { return }
+        trace("send: input emptied but no message appeared; sending again")
+        if try attempt() { return }
+        throw BridgeError("send_failed", "메시지가 대화에 나타나지 않았습니다 · 카카오톡에서 확인해 주세요")
     }
 
     /// Explains what in KakaoTalk might be stopping a send, for the error message.
