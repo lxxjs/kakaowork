@@ -4,6 +4,12 @@ macOS 카카오톡을 **터미널에서 Claude Code 같은 UI로** 쓰는 CLI입
 
 <img src="docs/banner.png" width="720" alt="kakaowork 시작 화면: 고양이 마스코트, 시작 팁, 최근 대화가 있는 배너와 입력창">
 
+<details>
+<summary>Claude 테마로 보기 (<code>/theme claude</code>)</summary>
+<br>
+<img src="docs/banner-claude.png" width="720" alt="kakaowork 시작 화면, Claude 테마: 강조색과 마스코트가 Claude 주황">
+</details>
+
 ```
 ⏺ Open(개발팀)
   ⎿  5명 · 메시지 40개 · 이전 메시지는 /more (PgUp)
