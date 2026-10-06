@@ -3,7 +3,7 @@
 macOS 카카오톡을 **터미널에서 Claude Code 같은 UI로** 쓰는 CLI입니다.
 
 ```
-╭─── KakaoTalk Code v0.1.1 ────────────────────────────────────────────────────╮
+╭─── KakaoTalk Code v0.2.0 ────────────────────────────────────────────────────╮
 │                                   │ Tips for getting started                 │
 │         Welcome back 나!          │ /chats 로 채팅방을 골라 여세요           │
 │                                   │ /open ㄱㅈ 처럼 초성으로 바로 열기       │
