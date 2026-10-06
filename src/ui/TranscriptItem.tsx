@@ -206,7 +206,7 @@ function HelpView() {
 					</Box>
 				))}
 				<Box marginTop={1}>
-					<Text color={theme.secondary}>메시지는 그냥 입력하고 ⏎ · 줄바꿈은 \⏎ 또는 ⌥⏎ · 입력창이 비었을 때 ? 로 단축키 보기</Text>
+					<Text color={theme.secondary}>메시지는 그냥 입력하고 ⏎ · 줄바꿈은 \⏎ 또는 ⌥⏎ · 대화 스크롤은 PgUp·휠 · ↑↓ 입력 기록 · Tab 자동완성 · Esc 취소</Text>
 				</Box>
 			</Box>
 		</Box>

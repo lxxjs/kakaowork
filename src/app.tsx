@@ -10,7 +10,7 @@ import {deleteAll, graphics} from './lib/kitty.js';
 import {saveSettings} from './lib/settings.js';
 import {formatClock, isoDay} from './lib/time.js';
 import {applyUnread, fillTimes, firstUnreadRow, Grouper, isGroupRoom, item, settleTimes, type Item} from './lib/transcript.js';
-import {Shortcuts, StatusLine} from './ui/Footer.js';
+import {StatusLine} from './ui/Footer.js';
 import {Picker} from './ui/Picker.js';
 import {PromptInput} from './ui/PromptInput.js';
 import {Spinner, TypingSpinner} from './ui/Spinner.js';
@@ -80,7 +80,7 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 	const [items, setItems] = useState<Item[]>([]);
 	const [scroll, setScrollState] = useState(0);
 	const [unseen, setUnseen] = useState(0);
-	const [editor, setEditor] = useState<ed.Editor>(ed.emptyEditor);
+	const [editor, setEditorState] = useState<ed.Editor>(ed.emptyEditor);
 	const [busy, setBusy] = useState<Busy | null>(null);
 	/** When the other side of the open room started typing. */
 	const [typing, setTyping] = useState<number | null>(null);
@@ -93,7 +93,6 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 	const [hidden, setHidden] = useState(false);
 	const [notify, setNotifyState] = useState(true);
 	const [menuIndex, setMenuIndex] = useState(0);
-	const [showShortcuts, setShowShortcuts] = useState(false);
 	const [hint, setHint] = useState<string | undefined>();
 
 	// Mirrors of state for async code (bridge events, awaited calls).
@@ -104,6 +103,12 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 	// Sent messages shown as typed, by item id, until KakaoTalk's copy comes back.
 	const pendingSends = useRef<{text: string; id: number}[]>([]);
 	const itemsRef = useRef<Item[]>([]);
+	// What the next key edits: keys that arrive together are handled before the state redraws.
+	const editorRef = useRef(editor);
+	const setEditor = (next: ed.Editor) => {
+		editorRef.current = next;
+		setEditorState(next);
+	};
 	/** Whether the open room was chosen in the /chat list rather than opened by name. */
 	const fromPicker = useRef(false);
 	itemsRef.current = items;
@@ -716,7 +721,6 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 		history.current.push(text);
 		historyIndex.current = null;
 		setEditor(ed.emptyEditor);
-		setShowShortcuts(false);
 		// "//" escapes a message that really starts with a slash.
 		if (text.startsWith('/') && !text.startsWith('//')) void runCommand(text.trim());
 		else void send(text.startsWith('//') ? text.slice(1) : text);
@@ -817,7 +821,7 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 
 	const onCtrlC = () => {
 		if (picker) return setPicker(null);
-		if (editor.value) return setEditor(ed.emptyEditor);
+		if (editorRef.current.value) return setEditor(ed.emptyEditor);
 		if (exitTimer.current) {
 			void quit();
 			return;
@@ -858,7 +862,8 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 		return () => clearInterval(timer);
 	}, []);
 
-	useInput((input, key) => {
+	const onKey = (input: string, key: Key): void => {
+		const editor = editorRef.current;
 		// Focus reports (turned on in cli.tsx): unread counts are only re-read while the terminal is in front.
 		if (input === '[I' || input === '[O') {
 			focused.current = input === '[I';
@@ -876,6 +881,22 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 		}
 
 		if (key.ctrl && input === 'c') return onCtrlC();
+
+		// Enter can arrive glued to typed text — an IME commits its last syllable as Enter goes
+		// down, or the app was busy drawing — and Ink passes the two on as one string. Taken as
+		// text, the Enter became a line break and the message stayed unsent.
+		const glued = input.length > 1 && input.indexOf('\r') === input.lastIndexOf('\r') && (input.startsWith('\r') || input.endsWith('\r'));
+		if (glued && !key.ctrl && !key.meta) {
+			const text = input.replace('\r', '');
+			// The list's selection is a redraw behind its filter, so there Enter is left to be pressed again.
+			if (picker) return pickerKeys(text, key);
+			const enter = {...key, return: true};
+			if (input.startsWith('\r')) onKey('', enter);
+			onKey(text, key);
+			if (input.endsWith('\r')) onKey('', enter);
+			return;
+		}
+
 		if (picker) return pickerKeys(input, key);
 
 		if (key.escape) {
@@ -883,8 +904,6 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 				token.current++;
 				setBusy(null);
 				push(item({type: 'text', tone: 'error', text: '  ⎿  Interrupted by user'}));
-			} else if (showShortcuts) {
-				setShowShortcuts(false);
 			} else if (menu.length > 0 || editor.value) {
 				setEditor(ed.emptyEditor);
 			}
@@ -927,11 +946,6 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 
 		if (input === '\n') return edit(ed.insert(editor, '\n'));
 
-		if (input === '?' && !editor.value && !key.ctrl && !key.meta) {
-			setShowShortcuts(s => !s);
-			return;
-		}
-
 		const page = Math.max(1, metrics.current.viewport - 2);
 		if (key.pageUp) {
 			// Past the top of what is loaded, fetch older history.
@@ -972,15 +986,14 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 		}
 
 		const next = editKeys(input, key, editor);
-		if (next) {
-			setShowShortcuts(false);
-			edit(next);
-		}
-	});
+		if (next) edit(next);
+	};
+
+	useInput(onKey);
 
 	usePaste(text => {
 		if (picker) setPicker({...picker, query: ed.insert(picker.query, text.replace(/\n/g, ' ')), selected: 0});
-		else edit(ed.insert(editor, text));
+		else edit(ed.insert(editorRef.current, text));
 	});
 
 	// ── render ───────────────────────────────────────────────────────────────
@@ -1012,8 +1025,6 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 			)}
 			{picker ? null : menu.length > 0 ? (
 				<Suggestions items={menu} selected={selectedMenu} columns={columns} />
-			) : showShortcuts ? (
-				<Shortcuts columns={columns} />
 			) : (
 				<StatusLine
 					columns={columns}

@@ -1,7 +1,6 @@
 import {Box, Text} from 'ink';
 import {Fragment, type ReactNode} from 'react';
 import type {ChatRoom} from '../bridge/types.js';
-import {pad, width} from '../lib/text.js';
 import {theme} from './theme.js';
 
 type Props = {
@@ -63,37 +62,6 @@ export function StatusLine({columns, hint, room, totalUnread, hidden, notify, de
 				))}
 			</Text>
 			{hint ? <Text color={theme.secondary}>{hint}</Text> : null}
-		</Box>
-	);
-}
-
-const SHORTCUTS: Array<[string, string]> = [
-	['/', '명령어'],
-	['⏎', '보내기'],
-	['ctrl+c ×2', '종료'],
-	['/chat', '채팅방 전환'],
-	['\\⏎ · ⌥⏎', '줄바꿈'],
-	['esc', '취소'],
-	['tab', '자동완성'],
-	['↑ ↓', '입력 기록'],
-	['pgup·휠', '대화 스크롤'],
-];
-
-export function Shortcuts({columns}: {columns: number}) {
-	const cell = Math.max(20, Math.floor((columns - 4) / 3));
-	const rows = [SHORTCUTS.slice(0, 3), SHORTCUTS.slice(3, 6), SHORTCUTS.slice(6, 9)];
-	return (
-		<Box flexDirection="column" paddingX={2}>
-			{rows.map((row, i) => (
-				<Text key={i}>
-					{row.map(([key, label]) => (
-						<Text key={key}>
-							<Text>{key}</Text>
-							<Text color={theme.secondary}>{pad(' ' + label, cell - width(key))}</Text>
-						</Text>
-					))}
-				</Text>
-			))}
 		</Box>
 	);
 }
