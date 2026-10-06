@@ -111,10 +111,11 @@ const instance = render(
 // focus reporting so unread counts are refreshed only while the terminal is in front.
 const reportingOn = '\u001B[?1000h\u001B[?1006h\u001B[?1004h';
 const reportingOff = '\u001B[?1000l\u001B[?1006l\u001B[?1004l';
-process.stdout.write(reportingOn);
+process.stdout.write(reportingOn + (graphics.kitty ? deleteAll : ''));
 process.on('exit', () => process.stdout.write(reportingOff + (graphics.kitty ? deleteAll : '')));
 
 const shutdown = () => {
+	if (graphics.kitty) process.stdout.write(deleteAll);
 	bridge.dispose();
 	instance.unmount();
 };

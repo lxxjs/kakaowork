@@ -64,6 +64,12 @@ export interface Bridge {
 	chats(limit?: number): Promise<{rooms: ChatRoom[]; totalUnread: number | null}>;
 	open(name: string, index?: number): Promise<{title: string; alreadyOpen: boolean}>;
 	messages(title: string, limit: number, watch: boolean): Promise<{messages: Message[]; rowCount: number}>;
+	/**
+	 * The `count` messages before the oldest one read so far, however far back KakaoTalk keeps
+	 * them. Rows already read have moved down by `shift`; `exhausted` marks the first message.
+	 * Fails with `resync` when it cannot tell where it left off — read the room again then.
+	 */
+	older(title: string, count: number): Promise<{messages: Message[]; rowCount: number; shift: number; exhausted: boolean}>;
 	/** Re-reads unread counts from row `from` to the newest one. */
 	unread(title: string, from: number): Promise<{rows: UnreadRow[]}>;
 	send(title: string, text: string): Promise<void>;

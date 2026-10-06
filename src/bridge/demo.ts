@@ -91,6 +91,7 @@ export class DemoBridge implements Bridge {
 	private readonly listeners = new Set<(event: BridgeEvent) => void>();
 	private readonly timers: NodeJS.Timeout[] = [];
 	private watching?: string;
+	private oldest = 0;
 	private watchChats = false;
 
 	constructor() {
@@ -121,7 +122,17 @@ export class DemoBridge implements Bridge {
 		await delay(300);
 		if (watch) this.watching = title;
 		const log = room.log.map((m, row) => ({...m, row}));
+		this.oldest = Math.max(0, log.length - limit);
 		return {messages: log.slice(-limit), rowCount: log.length};
+	}
+
+	async older(title: string, count: number) {
+		const room = this.find(title);
+		await delay(300);
+		const start = Math.max(0, this.oldest - count);
+		const messages = room.log.map((m, row) => ({...m, row})).slice(start, this.oldest);
+		this.oldest = start;
+		return {messages, rowCount: room.log.length, shift: 0, exhausted: messages.length < count};
 	}
 
 	async unread(title: string, from: number) {

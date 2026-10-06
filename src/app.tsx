@@ -1,10 +1,10 @@
 import {execFile} from 'node:child_process';
 import {Box, Text, useApp, useInput, usePaste, useWindowSize, type Key} from 'ink';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import type {Bridge, BridgeEvent, ChatRoom, Message} from './bridge/types.js';
+import {BridgeError, type Bridge, type BridgeEvent, type ChatRoom, type Message} from './bridge/types.js';
 import * as ed from './lib/editor.js';
 import {filterRooms} from './lib/fuzzy.js';
-import {graphics} from './lib/kitty.js';
+import {deleteAll, graphics} from './lib/kitty.js';
 import {saveSettings} from './lib/settings.js';
 import {formatClock, isoDay} from './lib/time.js';
 import {applyUnread, fillTimes, firstUnreadRow, Grouper, isGroupRoom, item, settleTimes, type Item} from './lib/transcript.js';
@@ -99,6 +99,8 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 	// Sent messages shown as typed, by item id, until KakaoTalk's copy comes back.
 	const pendingSends = useRef<{text: string; id: number}[]>([]);
 	const itemsRef = useRef<Item[]>([]);
+	/** Whether the open room was chosen in the /chats list rather than opened by name. */
+	const fromPicker = useRef(false);
 	itemsRef.current = items;
 	// Terminal focus, from focus reports; assumed until the terminal says otherwise.
 	const focused = useRef(true);
@@ -428,6 +430,7 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 			return;
 		}
 
+		fromPicker.current = false;
 		await enterRoom(room);
 	};
 
@@ -440,13 +443,29 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 
 		const id = begin('이전 메시지 불러오는 중');
 		try {
-			const limit = cur.limit + count;
-			const result = await bridge.messages(cur.title, limit, true);
-			if (stale(id)) return;
-			showRoom({...cur, limit, rowCount: result.rowCount}, result.messages, true);
-			if (result.messages.length < limit) {
-				push(item({type: 'text', text: '카카오톡 창에 불러온 메시지를 모두 가져왔습니다'}));
+			let limit = cur.limit + count;
+			let result: {messages: Message[]; rowCount: number};
+			let exhausted: boolean;
+			try {
+				// Only the older part is read; what is on screen moves down by however many rows
+				// KakaoTalk had to load in front of it.
+				const older = await bridge.older(cur.title, count);
+				if (stale(id)) return;
+				const held = itemsRef.current.flatMap(it =>
+					it.type === 'message' && it.message.row >= 0 ? [{...it.message, row: it.message.row + older.shift}] : [],
+				);
+				limit = cur.limit + older.messages.length;
+				result = {messages: [...older.messages, ...held], rowCount: older.rowCount};
+				exhausted = older.exhausted;
+			} catch (error) {
+				if (!(error instanceof BridgeError) || error.code !== 'resync') throw error;
+				result = await bridge.messages(cur.title, limit, true);
+				if (stale(id)) return;
+				exhausted = result.messages.length < limit;
 			}
+
+			showRoom({...cur, limit, rowCount: result.rowCount}, result.messages, true);
+			if (exhausted) push(item({type: 'text', text: '대화의 처음까지 모두 가져왔습니다'}));
 		} catch (error) {
 			if (!stale(id)) fail('More', String(count), error);
 		} finally {
@@ -489,6 +508,8 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 	const quit = async () => {
 		const cur = currentRef.current;
 		if (cur?.openedByUs) await Promise.race([bridge.close(cur.title).catch(() => {}), sleep(1000)]);
+		// While still on the alternate screen, where the pictures were sent.
+		if (graphics.kitty) process.stdout.write(deleteAll);
 		exit();
 	};
 
@@ -522,6 +543,8 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 					await bridge.close(cur.title);
 					setCurrent(null);
 					push(item({type: 'tool', title: 'Close', arg: cur.title, status: 'ok', lines: ['채팅창을 닫았습니다']}));
+					// Picked from the list, so closing goes back to the list.
+					if (fromPicker.current) await openPicker();
 				} catch (error) {
 					fail('Close', cur.title, error);
 				}
@@ -773,7 +796,10 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 		if (key.return) {
 			const room = pickerRooms[picker.selected];
 			setPicker(null);
-			if (room) void enterRoom(room);
+			if (room) {
+				fromPicker.current = true;
+				void enterRoom(room);
+			}
 			return;
 		}
 
@@ -837,6 +863,7 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 				if (chosen.run === 'room' && chosen.room) {
 					history.current.push(chosen.value);
 					setEditor(ed.emptyEditor);
+					fromPicker.current = false;
 					void enterRoom(chosen.room);
 					return;
 				}

@@ -8,10 +8,15 @@ final class RoomWatch {
     var lastSignature = ""
     var lastSender: String?
     var tail: [String] = []
+    /// Rows between the oldest message the CLI holds and the newest one reported, so older
+    /// history can be read from where it left off however the rows get renumbered.
+    /// Nil once that can no longer be told (the CLI then reads the room again).
+    var span: Int?
 
     init(title: String, messages: [Message]) {
         self.title = title
         record(messages)
+        if let first = messages.first, let last = messages.last { span = last.row - first.row }
     }
 
     func record(_ messages: [Message]) {
@@ -59,6 +64,7 @@ extension Kakao {
             for i in (room.lastIndex + 1)...lastIndex {
                 if let m = parse(i) { fresh.append(m) }
             }
+            room.span = room.span.map { $0 + lastIndex - room.lastIndex }
         } else {
             // Rows shifted (older history loaded, a message deleted, …): line up by content.
             var parsed: [Int: Message] = [:]
@@ -69,6 +75,7 @@ extension Kakao {
             let window = parsed.keys.sorted().compactMap { parsed[$0] }
             let known = RoomWatch.alignment(tail: room.tail, window: window.map(\.signature))
             fresh = Array(window[(known + 1)...])
+            room.span = known >= 0 ? room.span.map { $0 + lastIndex - window[known].row } : nil
         }
         Kakao.fillSenders(&fresh, carry: room.lastSender)
         Kakao.fillDividerDates(&fresh)
@@ -76,5 +83,48 @@ extension Kakao {
         room.lastIndex = lastIndex
         room.lastSignature = lastMessage.signature
         return fresh
+    }
+
+    /// The `count` rows before the oldest one the CLI holds, loading more of the conversation
+    /// into KakaoTalk's window if need be. `shift` is how far that moved the rows already read.
+    func older(_ room: RoomWatch, count: Int) throws -> (messages: [Message], rowCount: Int, shift: Int, exhausted: Bool) {
+        guard let window = try chatWindow(title: room.title), let (scroll, table) = messageTable(in: window) else {
+            throw BridgeError("no_window", "'\(room.title)' 채팅창이 열려 있지 않습니다")
+        }
+        guard let span = room.span, room.lastIndex >= span else {
+            throw BridgeError("resync", "이전 메시지의 위치를 알 수 없습니다")
+        }
+        var oldest = room.lastIndex - span
+        // Row 0 is where KakaoTalk's loaded history starts, so ask for enough rows to cover the request.
+        let shift = oldest < count ? loadHistory(scroll: scroll, table: table, rows: table.children.count + count - oldest) : 0
+        oldest += shift
+        room.lastIndex += shift
+        // Everything below counts on the newest reported row being where the sums say it is.
+        func inPlace() -> Bool {
+            let rows = table.children
+            return room.lastIndex < rows.count && Parse.messageRow(rows[room.lastIndex], index: room.lastIndex)?.signature == room.lastSignature
+        }
+        guard inPlace() else {
+            room.span = nil
+            throw BridgeError("resync", "이전 메시지의 위치를 알 수 없습니다")
+        }
+
+        let start = max(0, oldest - count)
+        var list = read(window: window, scroll: scroll, table: table, indices: Array(start..<oldest))
+        complete(&list, scroll: scroll, table: table)
+        guard inPlace() else {
+            room.span = nil
+            throw BridgeError("resync", "읽는 동안 메시지 목록이 바뀌었습니다")
+        }
+        // A separator closing the run is dated by a message the CLI already has.
+        if let last = list.indices.last, list[last].kind == "divider", list[last].date == nil {
+            let rows = table.children
+            for index in oldest..<min(rows.count, oldest + 20) {
+                guard let m = Parse.messageRow(rows[index], index: index), m.kind != "divider" else { break }
+                if let date = m.date { list[last].date = date; break }
+            }
+        }
+        room.span = room.lastIndex - start
+        return (list, table.children.count, shift, start == 0 && oldest < count)
     }
 }

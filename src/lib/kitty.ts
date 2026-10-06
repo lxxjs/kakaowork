@@ -64,11 +64,18 @@ export function placeholderLines(id: number, columns: number, rows: number): str
 	});
 }
 
-/** Frees every image this app sent, e.g. on exit. */
+/**
+ * Frees every image and placement on the current screen. Sent on the alternate screen at
+ * startup and before leaving it: Ghostty keeps a screen's images after the app that sent
+ * them is gone, and a picture sent later under the same id is drawn in the old placement's
+ * cells — shrunk or cut off inside the space laid out for the new one.
+ */
 export const deleteAll = '\u001B_Ga=d,d=A,q=2\u001B\\';
 
 const placed = new WeakMap<Thumbnail, Map<string, number>>();
-let nextId = 1;
+// Ids travel in the placeholder's 24-bit colour. Starting somewhere random keeps a run from
+// reusing the ids of one that was killed before it could clean up.
+let nextId = 1 + Math.floor(Math.random() * 0xf00000);
 
 /**
  * Placeholder lines for a picture, sending it to the terminal the first time it is shown

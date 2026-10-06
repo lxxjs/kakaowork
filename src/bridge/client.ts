@@ -1,5 +1,7 @@
 import {spawn, type ChildProcessWithoutNullStreams} from 'node:child_process';
-import {existsSync} from 'node:fs';
+import {constants, copyFileSync, existsSync, mkdtempSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {dirname, join} from 'node:path';
 import {createInterface} from 'node:readline';
 import {fileURLToPath} from 'node:url';
 import {BridgeError, type Bridge, type BridgeEvent, type ChatRoom, type Message, type Status, type UnreadRow} from './types.js';
@@ -12,6 +14,21 @@ type Pending = {
 
 export function bridgeBinaryPath(): string {
 	return process.env.KAKAOWORK_BRIDGE ?? fileURLToPath(new URL('../kakao-bridge', import.meta.url));
+}
+
+/**
+ * Copies the bridge to a directory of its own for this run. macOS's screen capture service
+ * tells its clients apart by executable path, so a second kakaowork running the same binary
+ * breaks picture capture for both.
+ */
+function privateCopy(binary: string): string | undefined {
+	try {
+		const copy = join(mkdtempSync(join(tmpdir(), 'kakaowork-')), 'kakao-bridge');
+		copyFileSync(binary, copy, constants.COPYFILE_FICLONE);
+		return copy;
+	} catch {
+		return undefined;
+	}
 }
 
 /** Talks JSON lines to the Swift helper that drives KakaoTalk through the Accessibility API. */
@@ -28,13 +45,20 @@ export class ProcessBridge implements Bridge {
 			throw new BridgeError('no_bridge', `브리지 바이너리가 없습니다: ${binary} (다시 설치해 주세요: brew reinstall kakaowork)`);
 		}
 
-		this.child = spawn(binary, [], {stdio: ['pipe', 'pipe', 'pipe']});
+		const copy = privateCopy(binary);
+		const cleanUp = () => {
+			if (copy) rmSync(dirname(copy), {recursive: true, force: true});
+		};
+
+		process.once('exit', cleanUp);
+		this.child = spawn(copy ?? binary, [], {stdio: ['pipe', 'pipe', 'pipe']});
 		createInterface({input: this.child.stdout}).on('line', line => this.receive(line));
 		this.child.stderr.on('data', (chunk: Buffer) => {
 			this.stderr = (this.stderr + chunk.toString()).slice(-2000);
 		});
 		this.child.on('exit', code => {
 			this.exited = true;
+			cleanUp();
 			for (const [, p] of this.pending) {
 				clearTimeout(p.timer);
 				p.reject(new BridgeError('bridge_exit', '브리지 프로세스가 종료되었습니다'));
@@ -59,6 +83,10 @@ export class ProcessBridge implements Bridge {
 
 	messages(title: string, limit: number, watch: boolean) {
 		return this.call<{messages: Message[]; rowCount: number}>('messages', {title, limit, watch}, 60_000);
+	}
+
+	older(title: string, count: number) {
+		return this.call<{messages: Message[]; rowCount: number; shift: number; exhausted: boolean}>('older', {title, count}, 60_000);
 	}
 
 	unread(title: string, from: number) {

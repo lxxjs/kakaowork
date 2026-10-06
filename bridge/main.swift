@@ -91,6 +91,14 @@ final class Server {
             }
             return ["messages": messages.map(\.json), "rowCount": rowCount]
 
+        case "older":
+            guard let title = req["title"] as? String else { throw BridgeError("bad_request", "title 이 필요합니다") }
+            // Report anything new first, so the watch knows where the newest row is now.
+            pollRoom()
+            guard let room, room.title == title else { throw BridgeError("resync", "보고 있는 채팅방이 아닙니다") }
+            let older = try kakao.older(room, count: req["count"] as? Int ?? 40)
+            return ["messages": older.messages.map(\.json), "rowCount": older.rowCount, "shift": older.shift, "exhausted": older.exhausted]
+
         case "unread":
             guard let title = req["title"] as? String else { throw BridgeError("bad_request", "title 이 필요합니다") }
             let rows = try kakao.unread(title: title, from: req["from"] as? Int ?? 0, limit: req["limit"] as? Int ?? 100)
@@ -163,6 +171,18 @@ final class Server {
         timer = t
     }
 
+    private func pollRoom() {
+        guard let room else { return }
+        do {
+            if let fresh = try kakao.poll(room) {
+                if !fresh.isEmpty { out.send(["event": "messages", "title": room.title, "messages": fresh.map(\.json)]) }
+            } else {
+                self.room = nil
+                out.send(["event": "closed", "title": room.title])
+            }
+        } catch {}
+    }
+
     private func poll() {
         tick += 1
         let running = kakao.app != nil
@@ -172,17 +192,7 @@ final class Server {
         }
         guard running else { return }
 
-        if let room {
-            do {
-                if let fresh = try kakao.poll(room) {
-                    if !fresh.isEmpty { out.send(["event": "messages", "title": room.title, "messages": fresh.map(\.json)]) }
-                } else {
-                    self.room = nil
-                    out.send(["event": "closed", "title": room.title])
-                }
-            } catch {}
-        }
-
+        pollRoom()
         kakao.enforceHidden()
 
         if watchChats && tick % 2 == 0, let rooms = try? kakao.visibleChats() {

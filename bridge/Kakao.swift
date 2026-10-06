@@ -515,11 +515,57 @@ final class Kakao {
         guard let (scroll, table) = messageTable(in: window) else {
             throw BridgeError("no_window", "메시지 목록을 찾을 수 없습니다")
         }
+        loadHistory(scroll: scroll, table: table, rows: limit + 2)
+        let count = table.children.count
+        var list = read(window: window, scroll: scroll, table: table, indices: Array(max(0, count - limit - 1)..<count))
+        if list.count > limit { list = Array(list.suffix(limit)) }
+        complete(&list, scroll: scroll, table: table)
+        return (list, count)
+    }
+
+    /// Makes KakaoTalk load older history until its table holds `wanted` rows, and returns how
+    /// many it added in front. KakaoTalk keeps only the newest rows of a conversation in the
+    /// table and fetches the ~50 before them each time the list is scrolled to its top.
+    @discardableResult
+    func loadHistory(scroll: AXUIElement, table: AXUIElement, rows wanted: Int) -> Int {
+        let initial = table.children.count
+        var count = initial
+        guard count < wanted, let bar = scrollBar(scroll) else { return 0 }
+        let atBottom = (bar.number ?? 1) > 0.999
+        // KakaoTalk can add a second batch a moment after the first, so wait for the count to hold still.
+        func settled() -> Int {
+            var seen = table.children.count
+            var calm = 0
+            while calm < 4 {
+                usleep(100_000)
+                let now = table.children.count
+                if now == seen { calm += 1 } else { seen = now; calm = 0 }
+            }
+            return seen
+        }
+        while count < wanted {
+            // Already at the top, nothing would move; step away first.
+            if (bar.number ?? 1) < 0.001 { bar.set(kAXValueAttribute, 0.02 as CFNumber); usleep(50_000) }
+            bar.set(kAXValueAttribute, 0 as CFNumber)
+            for _ in 0..<15 where table.children.count <= count { usleep(100_000) }
+            let grown = settled()
+            if grown <= count { break }  // the start of the conversation
+            count = grown
+        }
+        // Loading leaves the list where it was reading; a hidden window belongs at the newest message.
+        if atBottom {
+            bar.set(kAXValueAttribute, 1 as CFNumber)
+            count = settled()
+        }
+        return count - initial
+    }
+
+    /// Reads the rows at `indices`, oldest first, with their pictures.
+    func read(window: AXUIElement, scroll: AXUIElement, table: AXUIElement, indices: [Int]) -> [Message] {
         let rows = table.children
-        let start = max(0, rows.count - limit - 1)
         var parsed: [Int: Message] = [:]
         let viewport = scroll.frame
-        visitRows(scroll: scroll, table: table, indices: Array(start..<rows.count)) { index, row in
+        visitRows(scroll: scroll, table: table, indices: indices) { index, row in
             if let m = parseWithImage(row, index: index, window: window, viewport: viewport) { parsed[index] = m }
             return false
         }
@@ -535,10 +581,11 @@ final class Kakao {
             }
             if let bar, let original { bar.set(kAXValueAttribute, original as CFNumber) }
         }
+        return parsed.keys.sorted().compactMap { parsed[$0] }
+    }
 
-        var list = parsed.keys.sorted().compactMap { parsed[$0] }
-        if list.count > limit { list = Array(list.suffix(limit)) }
-
+    /// Fills in what a run of rows does not say by itself: senders and separator dates.
+    func complete(_ list: inout [Message], scroll: AXUIElement, table: AXUIElement) {
         // A sender's follow-up bubbles carry no name; look further back for the first one.
         var carry: String?
         if let first = list.first(where: { $0.kind != "divider" && $0.kind != "system" }), !first.mine, !first.hasProfile, first.row > 0 {
@@ -552,7 +599,6 @@ final class Kakao {
         }
         Kakao.fillSenders(&list, carry: carry)
         Kakao.fillDividerDates(&list)
-        return (list, rows.count)
     }
 
     /// Re-reads rows `from` through the newest (at most `limit`) for their unread counts.
