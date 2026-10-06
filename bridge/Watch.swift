@@ -12,6 +12,8 @@ final class RoomWatch {
     /// history can be read from where it left off however the rows get renumbered.
     /// Nil once that can no longer be told (the CLI then reads the room again).
     var span: Int?
+    /// Whether the typing bubble was at the end of the chat at the last poll.
+    var typing = false
 
     init(title: String, messages: [Message]) {
         self.title = title
@@ -48,9 +50,12 @@ extension Kakao {
 
         var lastIndex = -1
         var lastMessage: Message?
-        for i in stride(from: rows.count - 1, through: max(0, rows.count - 4), by: -1) {
+        var typing = false
+        for i in stride(from: rows.count - 1, through: max(0, rows.count - 5), by: -1) {
             if let m = Parse.messageRow(rows[i], index: i) { lastIndex = i; lastMessage = m; break }
+            if Parse.isTypingRow(rows[i]) { typing = true }
         }
+        room.typing = typing
         guard let lastMessage else { return [] }
         if lastIndex == room.lastIndex && lastMessage.signature == room.lastSignature { return [] }
 

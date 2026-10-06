@@ -174,7 +174,9 @@ final class Server {
     private func pollRoom() {
         guard let room else { return }
         do {
+            let wasTyping = room.typing
             if let fresh = try kakao.poll(room) {
+                if room.typing != wasTyping { out.send(["event": "typing", "title": room.title, "active": room.typing]) }
                 if !fresh.isEmpty { out.send(["event": "messages", "title": room.title, "messages": fresh.map(\.json)]) }
             } else {
                 self.room = nil

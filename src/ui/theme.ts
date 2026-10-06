@@ -15,9 +15,24 @@ export const theme = {
 	userBackground: 'rgb(55,55,55)',
 };
 
-export function useClaudeAccent() {
-	theme.accent = 'rgb(215,119,87)';
-	theme.accentShimmer = 'rgb(235,159,127)';
+export type ThemeName = 'kakao' | 'claude';
+
+const accents: Record<ThemeName, {accent: string; accentShimmer: string}> = {
+	kakao: {accent: theme.accent, accentShimmer: theme.accentShimmer},
+	claude: {accent: 'rgb(215,119,87)', accentShimmer: 'rgb(235,159,127)'},
+};
+
+let current: ThemeName = 'kakao';
+
+export function themeName(): ThemeName {
+	return current;
+}
+
+/** Switches the accent colour; anything else means KakaoTalk yellow. */
+export function setTheme(name: string | undefined): ThemeName {
+	current = name === 'claude' ? 'claude' : 'kakao';
+	Object.assign(theme, accents[current]);
+	return current;
 }
 
 const senderPalette = [

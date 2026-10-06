@@ -12,12 +12,12 @@ type Line = Segment[];
 // per cell; the nose is a cell whose top half is fur (text color) and bottom half pink
 // (background color).
 function mascot(): Line[] {
-	const fur = (text: string): Segment => ({text, color: theme.kakao});
+	const fur = (text: string): Segment => ({text, color: theme.accent});
 	const whisker: Segment = {text: '=', color: theme.secondary};
 	return [
 		[fur('  █▄     ▄█  ')],
 		[fur(' ▄██▀███▀██▄ ')],
-		[whisker, fur('███▄█'), {text: '▀', color: theme.kakao, background: theme.blush}, fur('█▄███'), whisker],
+		[whisker, fur('███▄█'), {text: '▀', color: theme.accent, background: theme.blush}, fur('█▄███'), whisker],
 		[fur('  ▀███████▀  ')],
 	];
 }
@@ -74,18 +74,18 @@ function recentLine(room: ChatRoom): Line {
 /** The two-column welcome box Claude Code greets you with. */
 export function Banner({me, version, appVersion, totalUnread, recent, cwd, columns, demo}: Props) {
 	const accent = theme.accent;
-	const title = ` KakaoTalk Code v${appVersion} `;
+	const title = ` KakaoWork v${appVersion} `;
 	const home = process.env.HOME;
 	const shortCwd = home && cwd.startsWith(home) ? '~' + cwd.slice(home.length) : cwd;
-	const greeting = me ? `Welcome back ${me}!` : 'Welcome to KakaoTalk Code!';
+	const greeting = me ? `Welcome back ${me}!` : 'Welcome to KakaoWork!';
 	const total = Math.min(columns, 110);
 
 	if (total < 64) {
 		const inner = total - 4;
 		const rows: Line[] = [
-			[{text: '✻ ', color: theme.kakao}, {text: greeting, bold: true}],
+			[{text: '✻ ', color: theme.accent}, {text: greeting, bold: true}],
 			[],
-			[{text: '  /help 도움말 · /chats 채팅방 열기', color: theme.secondary}],
+			[{text: '  /help 도움말 · /chat 채팅방 열기', color: theme.secondary}],
 			[],
 			[{text: `  cwd: ${shortCwd}`, color: theme.secondary}],
 		];
@@ -118,8 +118,8 @@ export function Banner({me, version, appVersion, totalUnread, recent, cwd, colum
 	const activity = recent.slice(0, 3).map(recentLine);
 	const right: Line[] = [
 		[{text: 'Tips for getting started', color: accent, bold: true}],
-		[{text: '/chats 로 채팅방을 골라 여세요'}],
-		[{text: '/open ㄱㅈ 처럼 초성으로 바로 열기'}],
+		[{text: '/chat 으로 채팅방을 골라 여세요'}],
+		[{text: '/chat ㄱㅈ 처럼 초성으로 바로 열기'}],
 		[{text: '메시지를 입력하고 ⏎ 로 보내세요'}],
 		[{text: '─'.repeat(rightWidth - 2), color: accent, dim: true}],
 		[{text: 'Recent activity', color: accent, bold: true}],

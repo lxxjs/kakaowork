@@ -9,7 +9,7 @@ import type {Item} from '../lib/transcript.js';
 import {Banner} from './Banner.js';
 import {senderColor, theme} from './theme.js';
 
-export type Context = {columns: number; cwd: string; appVersion: string};
+export type Context = {columns: number; cwd: string; appVersion: string; theme: string};
 
 function Body({message}: {message: Message}) {
 	switch (message.kind) {
@@ -174,14 +174,14 @@ function ToolView({item}: {item: Extract<Item, {type: 'tool'}>}) {
 }
 
 const HELP: Array<[string, string]> = [
-	['/chats', '채팅방 목록에서 골라 열기'],
-	['/open <이름>', '채팅방 바로 열기 (예: /open ㄱㅈ)'],
+	['/chat [이름]', '채팅방 열기 · 이름 없이는 목록에서 고르기 (예: /chat ㄱㅈ)'],
 	['/more [개수]', '이전 메시지 더 불러오기 (PgUp)'],
 	['/close', '현재 채팅방 닫기'],
-	['/hide · /show', '카카오톡 창 숨김 모드 켜기 · 끄기'],
 	['/notify [on|off]', '다른 방 새 메시지 알림'],
 	['/images [on|off]', '사진·이모티콘 그림으로 보기 (기본: 끔)'],
+	['/theme [claude|kakao]', '강조색 바꾸기 (Claude 주황 · 카톡 노랑)'],
 	['/status', '연결 상태'],
+	['/bug [내용]', '버그 신고 (GitHub 이슈 작성 화면 열기)'],
 	['/clear', '화면 지우기'],
 	['/exit', '종료 (Ctrl+C 두 번)'],
 ];
@@ -193,7 +193,7 @@ function HelpView() {
 				<Box width={2} flexShrink={0}>
 					<Text color={theme.accent}>✻</Text>
 				</Box>
-				<Text bold>KakaoTalk Code</Text>
+				<Text bold>KakaoWork</Text>
 				<Text color={theme.secondary}> — 터미널에서 쓰는 카카오톡</Text>
 			</Box>
 			<Box paddingLeft={2} marginTop={1} flexDirection="column">

@@ -126,6 +126,17 @@ enum Parse {
 
     // MARK: messages
 
+    /// KakaoTalk names the typing bubble's background after its asset ("chatmsg bg typing black").
+    private static func isTypingBubble(_ image: Node) -> Bool {
+        image.desc.range(of: "typing", options: .caseInsensitive) != nil
+    }
+
+    /// Whether `row` is the bubble KakaoTalk shows at the end of a chat while someone is typing.
+    static func isTypingRow(_ row: AXUIElement) -> Bool {
+        guard let cell = row.children.first else { return false }
+        return cell.children.contains { $0.role == "AXImage" && isTypingBubble(Node($0)) }
+    }
+
     static func messageRow(_ row: AXUIElement, index: Int) -> Message? {
         guard let cellElement = row.children.first else { return nil }
         let cell = Node(cellElement)
@@ -158,6 +169,9 @@ enum Parse {
                 break
             }
         }
+
+        // The "…" bubble shown while the other side types is a row like any other, not a message.
+        if images.contains(where: isTypingBubble) { return nil }
 
         if msg.hasProfile, let name = statics.min(by: { $0.frame.minY < $1.frame.minY }) {
             msg.sender = name.text

@@ -150,12 +150,17 @@ export class DemoBridge implements Bridge {
 		if (room.kind === 'me') return;
 		const others = [...new Set(room.log.filter(m => !m.mine && m.sender).map(m => m.sender!))];
 		const who = room.kind === 'direct' || others.length === 0 ? room.name : others[Math.floor(Math.random() * others.length)];
+		const typing = (active: boolean) => {
+			if (this.watching === room.name) this.emit({event: 'typing', title: room.name, active});
+		};
+
 		const timer = setTimeout(() => {
+			typing(false);
 			// Whoever replies has read everything before, so each count drops by one.
 			for (const m of room.log) if (m.unread) m.unread -= 1;
 			this.append(room, msg('text', replies[Math.floor(Math.random() * replies.length)], false, who, formatClock(new Date())));
-		}, 1200 + Math.random() * 1500);
-		this.timers.push(timer);
+		}, 2500 + Math.random() * 3000);
+		this.timers.push(timer, setTimeout(() => typing(true), 600));
 	}
 
 	async watch(options: {chats?: boolean; stopRoom?: boolean}) {

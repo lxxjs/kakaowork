@@ -3,7 +3,7 @@ import {homedir} from 'node:os';
 import {dirname, join} from 'node:path';
 
 /** Preferences that outlive a session, e.g. whether to show pictures. */
-export type Settings = {images?: 'on' | 'off'};
+export type Settings = {images?: 'on' | 'off'; theme?: 'kakao' | 'claude'};
 
 export function settingsPath(env: NodeJS.ProcessEnv = process.env): string {
 	return join(env.XDG_CONFIG_HOME ?? join(homedir(), '.config'), 'kakaowork', 'settings.json');

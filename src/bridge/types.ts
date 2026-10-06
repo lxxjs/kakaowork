@@ -55,6 +55,8 @@ export interface Status {
 export type BridgeEvent =
 	| {event: 'messages'; title: string; messages: Message[]}
 	| {event: 'chats'; rooms: ChatRoom[]; totalUnread: number | null}
+	/** The other side started or stopped typing in the watched room. */
+	| {event: 'typing'; title: string; active: boolean}
 	| {event: 'closed'; title: string}
 	| {event: 'app'; running: boolean}
 	| {event: 'exit'; code: number | null; stderr: string};

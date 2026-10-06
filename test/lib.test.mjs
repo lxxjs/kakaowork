@@ -250,3 +250,20 @@ test('settings are saved as JSON and merged', () => {
 	saveSettings({images: 'off'}, path);
 	assert.deepEqual(loadSettings(path), {images: 'off'});
 });
+
+import {bugReportUrl} from '../dist/lib/bug.js';
+
+test('bugReportUrl fills in the title, what was said and the setup', () => {
+	const env = {app: '0.2.0', kakaoTalk: '26.8.0', os: 'Darwin 25.6.0 (arm64)', terminal: 'ghostty 1.3.1', node: 'v26.10.0', images: 'kitty'};
+	const url = new URL(bugReportUrl('사진이 안 보여요\n방을 열면 [사진]으로만 나옵니다', env));
+	assert.equal(url.origin + url.pathname, 'https://github.com/lxxjs/kakaowork/issues/new');
+	assert.equal(url.searchParams.get('title'), '사진이 안 보여요');
+	const body = url.searchParams.get('body');
+	assert.match(body, /방을 열면 \[사진\]으로만 나옵니다/);
+	assert.match(body, /- kakaowork 0\.2\.0\n- KakaoTalk 26\.8\.0\n- macOS Darwin 25\.6\.0 \(arm64\)\n- 터미널 ghostty 1\.3\.1/);
+
+	const empty = new URL(bugReportUrl('', {...env, kakaoTalk: undefined}));
+	assert.equal(empty.searchParams.get('title'), '');
+	assert.match(empty.searchParams.get('body'), /KakaoTalk \?/);
+	assert.equal(new URL(bugReportUrl('가'.repeat(100), env)).searchParams.get('title').length, 70);
+});

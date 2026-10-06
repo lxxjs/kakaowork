@@ -2,20 +2,9 @@
 
 macOS 카카오톡을 **터미널에서 Claude Code 같은 UI로** 쓰는 CLI입니다.
 
-```
-╭─── KakaoTalk Code v0.2.0 ────────────────────────────────────────────────────╮
-│                                   │ Tips for getting started                 │
-│         Welcome back 나!          │ /chats 로 채팅방을 골라 여세요           │
-│                                   │ /open ㄱㅈ 처럼 초성으로 바로 열기       │
-│             █▄     ▄█             │ 메시지를 입력하고 ⏎ 로 보내세요          │
-│            ▄██▀███▀██▄            │ ──────────────────────────────────────── │
-│           =███▄█▀█▄███=           │ Recent activity                          │
-│             ▀███████▀             │ 민지 2 · 오후 3:28                       │
-│                                   │ 개발팀 3 · 오후 3:10                     │
-│   KakaoTalk 26.8.0 · 안 읽음 5    │                                          │
-│                 ~                 │                                          │
-╰──────────────────────────────────────────────────────────────────────────────╯
+<img src="docs/banner.png" width="720" alt="kakaowork 시작 화면: 고양이 마스코트, 시작 팁, 최근 대화가 있는 배너와 입력창">
 
+```
 ⏺ Open(개발팀)
   ⎿  5명 · 메시지 40개 · 이전 메시지는 /more (PgUp)
 
@@ -60,20 +49,20 @@ kakaowork 가족          # 바로 '가족' 방 열기 (초성도 가능: kakaow
 kakaowork 나            # 나와의 채팅
 kakaowork --no-hide    # 카카오톡 창을 숨기지 않고 쓰기
 kakaowork --images     # 사진·이모티콘을 그림으로 보기 (화면 기록 권한 필요)
-kakaowork --theme claude # 강조색을 Claude 주황으로 (기본: 카톡 노랑)
+kakaowork --theme claude # 이번 실행만 강조색을 Claude 주황으로 (기본: 카톡 노랑)
 kakaowork --demo       # 카카오톡 없이 가상 데이터로 UI 체험
 ```
 
 | 명령어 | 설명 |
 | --- | --- |
-| `/chats` | 채팅방 선택기 (↑↓, 입력해서 검색, ⏎ 열기) |
-| `/open <이름>` | 채팅방 바로 열기 (이름 일부 또는 초성) |
+| `/chat [이름]` | 이름 없이: 채팅방 선택기 (↑↓, 입력해서 검색, ⏎ 열기) · 이름과 함께: 바로 열기 (이름 일부 또는 초성) |
 | `/more [개수]` | 이전 메시지 더 불러오기 (`PgUp`) |
-| `/close` | 현재 채팅방 닫기 (`/chats` 목록에서 연 방이면 목록으로 돌아감) |
-| `/hide`, `/show` | 숨김 모드 켜기 / 끄기 (기본: 켜짐) |
+| `/close` | 현재 채팅방 닫기 (`/chat` 목록에서 연 방이면 목록으로 돌아감) |
 | `/notify [on\|off]` | 다른 방 새 메시지 알림 |
 | `/images [on\|off]` | 사진·이모티콘 그림으로 보기 (기본: 끔) |
+| `/theme [claude\|kakao]` | 강조색 바꾸기: Claude 주황 · 카톡 노랑 (설정이 저장됨) |
 | `/status` | 연결 상태 |
+| `/bug [내용]` | 버그 신고: 내용과 버전 정보가 채워진 GitHub 이슈 작성 화면을 브라우저로 엶 (대화 내용은 보내지 않음) |
 | `/clear` | 화면 지우기 |
 | `/help`, `/exit` | 도움말 / 종료 |
 
@@ -130,7 +119,7 @@ dist/kakao-bridge chats '{"limit": 5}'
 dist/kakao-bridge messages '{"title": "가족", "limit": 10}'
 ```
 
-헬퍼 프로토콜은 줄 단위 JSON입니다. 요청은 `{"id":1,"cmd":"chats","limit":30}`, 응답은 `{"id":1,"ok":true,"result":…}` 형식입니다. 이벤트는 `{"event":"messages"|"chats"|"closed"|"app",…}` 형식으로 옵니다.
+헬퍼 프로토콜은 줄 단위 JSON입니다. 요청은 `{"id":1,"cmd":"chats","limit":30}`, 응답은 `{"id":1,"ok":true,"result":…}` 형식입니다. 이벤트는 `{"event":"messages"|"typing"|"chats"|"closed"|"app",…}` 형식으로 옵니다.
 
 ### 배포
 

@@ -1,7 +1,9 @@
 import {execFile} from 'node:child_process';
+import {arch, release} from 'node:os';
 import {Box, Text, useApp, useInput, usePaste, useWindowSize, type Key} from 'ink';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {BridgeError, type Bridge, type BridgeEvent, type ChatRoom, type Message} from './bridge/types.js';
+import {bugReportUrl, environmentLines, type BugEnvironment} from './lib/bug.js';
 import * as ed from './lib/editor.js';
 import {filterRooms} from './lib/fuzzy.js';
 import {deleteAll, graphics} from './lib/kitty.js';
@@ -11,9 +13,9 @@ import {applyUnread, fillTimes, firstUnreadRow, Grouper, isGroupRoom, item, sett
 import {Shortcuts, StatusLine} from './ui/Footer.js';
 import {Picker} from './ui/Picker.js';
 import {PromptInput} from './ui/PromptInput.js';
-import {Spinner} from './ui/Spinner.js';
+import {Spinner, TypingSpinner} from './ui/Spinner.js';
 import {Suggestions, type Suggestion} from './ui/Suggestions.js';
-import {theme} from './ui/theme.js';
+import {setTheme, theme, themeName} from './ui/theme.js';
 import {Transcript} from './ui/Transcript.js';
 
 export type AppProps = {
@@ -30,15 +32,14 @@ type PickerState = {query: ed.Editor; selected: number; loading: boolean};
 type Busy = {label: string; since: number};
 
 const COMMANDS = [
-	{name: 'chats', args: '', desc: '채팅방 목록에서 골라 열기'},
-	{name: 'open', args: '<이름>', desc: '채팅방 열기 (초성 검색 가능)'},
+	{name: 'chat', args: '[이름]', desc: '채팅방 열기 · 이름 없이는 목록에서 고르기 (초성 검색 가능)'},
 	{name: 'more', args: '[개수]', desc: '이전 메시지 더 불러오기'},
 	{name: 'close', args: '', desc: '현재 채팅방 닫기'},
-	{name: 'hide', args: '', desc: '카카오톡 창 숨김 모드 (필요할 때만 잠깐 뜸)'},
-	{name: 'show', args: '', desc: '카카오톡 창 보이기 (숨김 모드 끄기)'},
 	{name: 'notify', args: '[on|off]', desc: '다른 방 새 메시지 알림 켜기/끄기'},
 	{name: 'images', args: '[on|off]', desc: '사진·이모티콘을 그림으로 보기 켜기/끄기'},
+	{name: 'theme', args: '[claude|kakao]', desc: '강조색 바꾸기 (Claude 주황 · 카톡 노랑)'},
 	{name: 'status', args: '', desc: '연결 상태 보기'},
+	{name: 'bug', args: '[내용]', desc: '버그 신고 (브라우저에 GitHub 이슈 작성 화면이 열림)'},
 	{name: 'clear', args: '', desc: '화면 지우기'},
 	{name: 'help', args: '', desc: '도움말'},
 	{name: 'exit', args: '', desc: '종료'},
@@ -81,7 +82,11 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 	const [unseen, setUnseen] = useState(0);
 	const [editor, setEditor] = useState<ed.Editor>(ed.emptyEditor);
 	const [busy, setBusy] = useState<Busy | null>(null);
+	/** When the other side of the open room started typing. */
+	const [typing, setTyping] = useState<number | null>(null);
 	const [picker, setPicker] = useState<PickerState | null>(null);
+	// Colours live in a shared object, so this is what makes a change redraw the transcript.
+	const [accent, setAccent] = useState(themeName());
 	const [rooms, setRoomsState] = useState<ChatRoom[]>([]);
 	const [current, setCurrentState] = useState<Current | null>(null);
 	const [totalUnread, setTotalUnread] = useState<number | null>(null);
@@ -99,7 +104,7 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 	// Sent messages shown as typed, by item id, until KakaoTalk's copy comes back.
 	const pendingSends = useRef<{text: string; id: number}[]>([]);
 	const itemsRef = useRef<Item[]>([]);
-	/** Whether the open room was chosen in the /chats list rather than opened by name. */
+	/** Whether the open room was chosen in the /chat list rather than opened by name. */
 	const fromPicker = useRef(false);
 	itemsRef.current = items;
 	// Terminal focus, from focus reports; assumed until the terminal says otherwise.
@@ -160,6 +165,7 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 	};
 
 	const setCurrent = (value: Current | null) => {
+		if (value?.title !== currentRef.current?.title) setTyping(null);
 		currentRef.current = value;
 		setCurrentState(value);
 	};
@@ -241,10 +247,16 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 				break;
 			}
 
+			case 'typing': {
+				if (currentRef.current?.title !== event.title) return;
+				setTyping(since => (event.active ? (since ?? Date.now()) : null));
+				break;
+			}
+
 			case 'closed': {
 				if (currentRef.current?.title !== event.title) return;
 				setCurrent(null);
-				push(item({type: 'text', tone: 'warning', text: `카카오톡에서 '${event.title}' 채팅창이 닫혔습니다 · /open 으로 다시 열 수 있어요`}));
+				push(item({type: 'text', tone: 'warning', text: `카카오톡에서 '${event.title}' 채팅창이 닫혔습니다 · /chat 으로 다시 열 수 있어요`}));
 				break;
 			}
 
@@ -426,7 +438,7 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 		}
 
 		if (!room) {
-			push(item({type: 'tool', title: 'Open', arg: query, status: 'error', lines: ['일치하는 채팅방이 없습니다 · /chats 로 목록을 확인하세요']}));
+			push(item({type: 'tool', title: 'Open', arg: query, status: 'error', lines: ['일치하는 채팅방이 없습니다 · /chat 으로 목록을 확인하세요']}));
 			return;
 		}
 
@@ -476,7 +488,7 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 	const send = async (text: string) => {
 		const cur = currentRef.current;
 		if (!cur) {
-			push(item({type: 'text', tone: 'warning', text: '열린 채팅방이 없습니다 · /chats 로 채팅방을 먼저 여세요'}));
+			push(item({type: 'text', tone: 'warning', text: '열린 채팅방이 없습니다 · /chat 으로 채팅방을 먼저 여세요'}));
 			return;
 		}
 
@@ -518,11 +530,11 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 		const arg = rest.trim();
 		const echo = () => push(item({type: 'prompt', text: line}));
 		switch (name) {
+			case 'chat':
+			// The names this command had before it became one.
 			case 'chats':
-			case 'c':
-				await openPicker();
-				break;
 			case 'open':
+			case 'c':
 			case 'o':
 				if (arg) await openRoom(arg);
 				else await openPicker();
@@ -547,20 +559,6 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 					if (fromPicker.current) await openPicker();
 				} catch (error) {
 					fail('Close', cur.title, error);
-				}
-
-				break;
-			}
-
-			case 'hide':
-			case 'show': {
-				echo();
-				try {
-					await bridge.setHidden(name === 'hide');
-					setHidden(name === 'hide');
-					push(item({type: 'tool', title: name === 'hide' ? 'Hide' : 'Show', arg: 'KakaoTalk', status: 'ok', lines: name === 'hide' ? ['카카오톡 창을 숨겼습니다 · 메시지는 계속 주고받아요', '방을 열 때만 잠깐 떴다가 다시 숨고, 포커스는 터미널로 돌아옵니다'] : ['카카오톡 창을 보이게 했습니다 · /hide 로 다시 숨김 모드']}));
-				} catch (error) {
-					fail(name === 'hide' ? 'Hide' : 'Show', 'KakaoTalk', error);
 				}
 
 				break;
@@ -608,12 +606,58 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 				break;
 			}
 
+			case 'theme': {
+				echo();
+				if (arg && arg !== 'claude' && arg !== 'kakao') {
+					push(item({type: 'tool', title: 'Theme', arg, status: 'error', lines: ['claude 또는 kakao 중에서 고르세요']}));
+					break;
+				}
+
+				const next = setTheme(arg || (themeName() === 'claude' ? 'kakao' : 'claude'));
+				setAccent(next);
+				saveSettings({theme: next});
+				push(
+					item({
+						type: 'tool',
+						title: 'Theme',
+						arg: next,
+						status: 'ok',
+						lines: [next === 'claude' ? '강조색을 Claude 주황으로 바꿨습니다' : '강조색을 카톡 노랑으로 바꿨습니다'],
+					}),
+				);
+				break;
+			}
+
 			case 'notify': {
 				echo();
 				const on = arg === 'on' ? true : arg === 'off' ? false : !notifyRef.current;
 				notifyRef.current = on;
 				setNotifyState(on);
 				push(item({type: 'tool', title: 'Notify', arg: on ? 'on' : 'off', status: 'ok', lines: [on ? '다른 채팅방의 새 메시지를 알려드려요' : '다른 채팅방 알림을 껐습니다']}));
+				break;
+			}
+
+			case 'bug': {
+				echo();
+				const env: BugEnvironment = {
+					app: appVersion,
+					kakaoTalk: await bridge.status().then(s => s.version, () => undefined),
+					os: `Darwin ${release()} (${arch()})`,
+					terminal: [process.env.TERM_PROGRAM ?? process.env.TERM ?? '?', process.env.TERM_PROGRAM_VERSION].filter(Boolean).join(' '),
+					node: process.version,
+					images: graphics.enabled ? (graphics.kitty ? 'kitty' : graphics.solid ? 'solid' : 'blocks') : 'off',
+				};
+				const url = bugReportUrl(arg, env);
+				const sent = ['함께 보내는 정보 · ' + environmentLines(env).join(' · '), '대화 내용은 들어가지 않습니다 · 브라우저에서 확인하고 제출하세요'];
+				execFile('open', [url], error => {
+					push(
+						item(
+							error
+								? {type: 'tool', title: 'Bug', status: 'error', lines: ['브라우저를 열지 못했습니다 · 아래 주소를 직접 열어 주세요', url]}
+								: {type: 'tool', title: 'Bug', status: 'ok', lines: ['GitHub 이슈 작성 화면을 열었습니다', ...sent]},
+						),
+					);
+				});
 				break;
 			}
 
@@ -692,7 +736,7 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 
 	const menu: MenuItem[] = useMemo(() => {
 		if (picker || !editor.value.startsWith('/') || editor.value.startsWith('//')) return [];
-		const openArg = /^\/(?:open|o)\s+([\s\S]*)$/.exec(editor.value);
+		const openArg = /^\/(?:chat|chats|open|c|o)\s+([\s\S]*)$/.exec(editor.value);
 		if (openArg) {
 			return filterRooms(rooms, openArg[1])
 				.slice(0, 6)
@@ -702,7 +746,7 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 					hint: [r.members ? `${r.members}명` : '', r.time].filter(Boolean).join(' · '),
 					badge: r.unread > 0 && !r.muted ? String(r.unread) : undefined,
 					run: 'room' as const,
-					value: `/open ${r.name}`,
+					value: `/chat ${r.name}`,
 					room: r,
 				}));
 		}
@@ -941,11 +985,11 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 
 	// ── render ───────────────────────────────────────────────────────────────
 
-	const context = useMemo(() => ({columns, cwd, appVersion}), [columns, cwd, appVersion]);
+	const context = useMemo(() => ({columns, cwd, appVersion, theme: accent}), [columns, cwd, appVersion, accent]);
 	const placeholder = current
 		? `${current.room.name}에게 메시지 보내기`
 		: rooms.length > 0
-			? 'Try "/chats" 또는 "/open 이름"'
+			? 'Try "/chat" 또는 "/chat 이름"'
 			: '카카오톡에 연결하는 중…';
 
 	// The conversation takes whatever the prompt area leaves. One row short of the screen on
@@ -960,7 +1004,7 @@ export function App({bridge, demo, appVersion, cwd, initialRoom, hideOnStart}: A
 					{unseen > 0 ? <Text color={theme.kakao}>새 메시지 {unseen}개 ↓</Text> : null}
 				</Box>
 			) : null}
-			{busy ? <Spinner label={busy.label} since={busy.since} /> : null}
+			{busy ? <Spinner label={busy.label} since={busy.since} /> : typing && current ? <TypingSpinner since={typing} /> : null}
 			{picker ? (
 				<Picker rooms={pickerRooms} query={picker.query} selected={picker.selected} loading={picker.loading} columns={columns} visible={PICKER_ROWS} />
 			) : (
