@@ -695,10 +695,19 @@ final class Kakao {
             throw BridgeError("send_failed", "전송 버튼이 활성화되지 않았습니다\(blockers(window))")
         }
         // KakaoTalk reports failure for AXPress even when it sends, so check the input instead.
+        // A read KakaoTalk is too busy to answer says nothing either way, so it doesn't count.
+        func cleared() -> Bool {
+            var value: AnyObject?
+            switch AXUIElementCopyAttributeValue(input, kAXValueAttribute as CFString, &value) {
+            case .success: return (value as? String ?? "").isEmpty
+            case .noValue: return true
+            default: return false
+            }
+        }
         send.perform(kAXPressAction)
         for _ in 0..<40 {
             usleep(50_000)
-            if (input.string ?? "").isEmpty { return }
+            if cleared() { return }
         }
         input.set(kAXValueAttribute, "" as CFString)
         throw BridgeError("send_failed", "전송되지 않았습니다")
